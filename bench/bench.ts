@@ -10,8 +10,28 @@
  */
 
 import net from "node:net";
-import { createRequire } from "node:module";
 import { SMTPServer as BunSMTPServer } from "../index.ts";
+
+// ---- Spawn Node.js smtp-server ----------------------------------------------
+
+async function spawnNodeServer(port: number): Promise<ReturnType<typeof Bun.spawn>> {
+  const script = import.meta.dir + "/node-server.cjs";
+  const proc = Bun.spawn(["node", script, String(port)], {
+    stdout: "pipe",
+    stderr: "inherit",
+  });
+  const reader = proc.stdout.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value);
+    if (buf.includes("ready")) break;
+  }
+  reader.releaseLock();
+  return proc;
+}
 
 // ---- CLI args ----------------------------------------------------------------
 
@@ -293,19 +313,7 @@ function printTable(a: Stats, b: Stats): void {
 // ---- Main -------------------------------------------------------------------
 
 async function main() {
-  // Start original smtp-server (CommonJS)
-  const _require = createRequire(import.meta.url);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { SMTPServer: NodeSMTPServer } = _require("smtp-server") as any;
-
-  const originalServer = new NodeSMTPServer({
-    authOptional: true,
-    disableReverseLookup: true,
-    onData(stream: NodeJS.ReadableStream, _session: unknown, cb: (err: null) => void) {
-      stream.on("data", () => {});
-      stream.on("end", () => cb(null));
-    },
-  });
+  const nodeProc = await spawnNodeServer(PORT_ORIGINAL);
 
   const bunServer = new BunSMTPServer({
     authOptional: true,
@@ -316,12 +324,10 @@ async function main() {
       cb(null);
     },
   });
-
-  await new Promise<void>((resolve) => originalServer.listen(PORT_ORIGINAL, HOST, resolve));
   bunServer.listen(PORT_BUN, HOST);
 
-  console.log(`smtp-server  → ${HOST}:${PORT_ORIGINAL}`);
-  console.log(`bun-smtp     → ${HOST}:${PORT_BUN}`);
+  console.log(`smtp-server (node) → ${HOST}:${PORT_ORIGINAL}`);
+  console.log(`bun-smtp           → ${HOST}:${PORT_BUN}`);
   console.log(`concurrency  : ${CONCURRENCY} | total: ${TOTAL} | size: ${SIZE} | warmup: ${WARMUP}`);
   console.log();
 
@@ -330,10 +336,8 @@ async function main() {
 
   printTable(statsOriginal, statsBun);
 
-  await Promise.all([
-    new Promise<void>((r) => originalServer.close(r)),
-    new Promise<void>((r) => bunServer.close(r)),
-  ]);
+  nodeProc.kill();
+  await new Promise<void>((r) => bunServer.close(r));
 
   process.exit(0);
 }
