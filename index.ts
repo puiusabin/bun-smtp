@@ -1,0 +1,23 @@
+export { SMTPServer } from "./src/smtp-server.ts";
+export type {
+  SMTPServerOptions,
+  SMTPSession,
+  SMTPAddress,
+  SMTPAddressArgs,
+  AuthObject,
+  AuthObjectPlain,
+  AuthObjectCramMd5,
+  AuthObjectXoauth2,
+  AuthObjectXclient,
+  AuthResponse,
+  DataStream,
+  OnConnectCallback,
+  OnSecureCallback,
+  OnAuthCallback,
+  OnMailFromCallback,
+  OnRcptToCallback,
+  OnDataCallback,
+  OnCloseCallback,
+  SMTPError,
+  TLSOptions,
+} from "./src/types.ts";
