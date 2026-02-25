@@ -1,6 +1,8 @@
 export { SMTPServer } from "./src/smtp-server.ts";
 export type {
   SMTPServerOptions,
+  SMTPServerEventMap,
+  ConnectionInfo,
   SMTPSession,
   SMTPAddress,
   SMTPAddressArgs,

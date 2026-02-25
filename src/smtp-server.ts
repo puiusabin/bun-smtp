@@ -6,7 +6,6 @@
  * original smtp-server API.
  */
 
-import { EventEmitter } from "node:events";
 import { hostname } from "node:os";
 import type { TCPSocket, TCPSocketListener } from "bun";
 import {
@@ -19,6 +18,7 @@ import {
 } from "./connection.ts";
 import type {
   SMTPServerOptions,
+  SMTPServerEventMap,
   ConnectionContext,
   ServerInstance,
   OnConnectCallback,
@@ -108,7 +108,7 @@ const defaultOnClose: OnCloseCallback = (_session) => {};
 
 // ---- SMTPServer ------------------------------------------------------------
 
-export class SMTPServer extends EventEmitter implements ServerInstance {
+export class SMTPServer implements ServerInstance {
   options: ServerInstance["options"];
   connections: Set<ConnectionContext> = new Set();
   closing = false;
@@ -126,9 +126,35 @@ export class SMTPServer extends EventEmitter implements ServerInstance {
 
   private _listener: TCPSocketListener<ConnectionContext> | null = null;
   private _closeTimeout: ReturnType<typeof setTimeout> | null = null;
+  private _closeCheckFn: (() => void) | null = null;
+  private _ev = new Map<string, Set<(...args: never[]) => void>>();
+
+  on<K extends keyof SMTPServerEventMap>(event: K, listener: (...args: SMTPServerEventMap[K]) => void): this {
+    let s = this._ev.get(event);
+    if (!s) { s = new Set(); this._ev.set(event, s); }
+    s.add(listener as never);
+    return this;
+  }
+
+  off<K extends keyof SMTPServerEventMap>(event: K, listener: (...args: SMTPServerEventMap[K]) => void): this {
+    this._ev.get(event)?.delete(listener as never);
+    return this;
+  }
+
+  once<K extends keyof SMTPServerEventMap>(event: K, listener: (...args: SMTPServerEventMap[K]) => void): this {
+    const w = (...args: SMTPServerEventMap[K]) => { this.off(event, w); listener(...args); };
+    return this.on(event, w as never);
+  }
+
+  emit<K extends keyof SMTPServerEventMap>(event: K, ...args: SMTPServerEventMap[K]): void {
+    for (const fn of this._ev.get(event) ?? []) (fn as (...a: SMTPServerEventMap[K]) => void)(...args);
+  }
+
+  _notifyConnectionClosed(): void {
+    this._closeCheckFn?.();
+  }
 
   constructor(options: SMTPServerOptions = {}) {
-    super();
 
     const defaults: ServerInstance["options"] = {
       secure: false,
@@ -285,7 +311,7 @@ export class SMTPServer extends EventEmitter implements ServerInstance {
 
     const checkDone = (): void => {
       if (this.connections.size === 0) {
-        this.removeListener("_connectionClosed", checkDone);
+        this._closeCheckFn = null;
         if (this._closeTimeout) {
           clearTimeout(this._closeTimeout);
           this._closeTimeout = null;
@@ -295,7 +321,7 @@ export class SMTPServer extends EventEmitter implements ServerInstance {
       }
     };
 
-    this.on("_connectionClosed", checkDone);
+    this._closeCheckFn = checkDone;
     return this;
   }
 

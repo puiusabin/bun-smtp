@@ -948,7 +948,7 @@ export function handleClose(ctx: ConnectionContext): void {
 
   // Notify server.close() that a connection drained
   if (ctx.server.closing) {
-    ctx.server.emit("_connectionClosed");
+    ctx.server._notifyConnectionClosed();
   }
 }
 
