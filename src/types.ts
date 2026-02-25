@@ -206,6 +206,25 @@ export interface SMTPServerOptions extends TLSOptions {
   onClose?: OnCloseCallback;
 }
 
+// ---- Server Event Map ---------------------------------------------------
+
+export interface ConnectionInfo {
+  id: string;
+  localAddress: string;
+  localPort: number;
+  remoteAddress: string;
+  remotePort: number;
+  hostNameAppearsAs: string;
+  clientHostname: string;
+}
+
+export type SMTPServerEventMap = {
+  listening: [];
+  close: [];
+  error: [SMTPError];
+  connect: [ConnectionInfo];
+};
+
 // ---- Internal Connection Context ----------------------------------------
 
 export interface ConnectionContext {
@@ -281,7 +300,8 @@ export interface ServerInstance {
   onRcptTo: OnRcptToCallback;
   onData: OnDataCallback;
   onClose: OnCloseCallback;
-  emit(event: string, ...args: unknown[]): boolean;
+  emit<K extends keyof SMTPServerEventMap>(event: K, ...args: SMTPServerEventMap[K]): void;
+  _notifyConnectionClosed(): void;
   tlsKey: string;
   tlsCert: string;
 }
