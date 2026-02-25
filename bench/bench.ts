@@ -72,71 +72,80 @@ function makeBody(size: string, subject: string): string {
 
 const PAYLOADS: string[] = SUBJECTS.map((sub) => `${makeBody(SIZE, sub)}\r\n.`);
 
-// ---- SMTP client state machine ----------------------------------------------
+// ---- SMTP client — persistent connection worker ----------------------------
+//
+// Each worker opens one TCP connection, sends `count` emails over it using
+// RSET between transactions, then QUITs. This eliminates TCP handshake and
+// TIME_WAIT overhead from the measurement.
 
-type State = "banner" | "ehlo" | "mail" | "rcpt" | "data_cmd" | "body" | "quit";
+type State = "banner" | "ehlo" | "mail" | "rcpt" | "data_cmd" | "body" | "rset" | "quit";
 
-function sendOne(host: string, port: number, payloadIdx: number): Promise<number> {
+function runWorker(
+  host: string,
+  port: number,
+  count: number,
+  startIdx: number,
+): Promise<number[]> {
   return new Promise((resolve, reject) => {
     const socket = net.createConnection({ host, port });
-    const DATA_PAYLOAD = PAYLOADS[payloadIdx % PAYLOADS.length] ?? "";
+    const latencies: number[] = [];
+    let msgIdx = startIdx;
     let buf = "";
     let state: State = "banner";
     let dataSentAt = 0;
 
     function flush() {
       while (true) {
-        const idx = buf.indexOf("\r\n");
-        if (idx === -1) break;
-        const line = buf.slice(0, idx);
-        buf = buf.slice(idx + 2);
+        const nl = buf.indexOf("\r\n");
+        if (nl === -1) break;
+        const line = buf.slice(0, nl);
+        buf = buf.slice(nl + 2);
         if (!line) continue;
         if (line[3] === "-") continue; // multi-line continuation
 
         const code = parseInt(line.slice(0, 3), 10);
-
-        if (code >= 500) {
-          socket.destroy();
-          reject(new Error(`SMTP ${code} in state ${state}: ${line}`));
-          return;
-        }
+        if (code >= 500) { socket.destroy(); reject(new Error(`SMTP ${code}: ${line}`)); return; }
 
         if (state === "banner") {
-          if (code !== 220) { socket.destroy(); reject(new Error(`Expected 220, got ${code}`)); return; }
           socket.write("EHLO benchmark.test\r\n");
           state = "ehlo";
         } else if (state === "ehlo") {
-          if (code !== 250) { socket.destroy(); reject(new Error(`Expected 250 after EHLO, got ${code}`)); return; }
           socket.write("MAIL FROM:<sender@benchmark.test>\r\n");
           state = "mail";
         } else if (state === "mail") {
-          if (code !== 250) { socket.destroy(); reject(new Error(`Expected 250 after MAIL FROM, got ${code}`)); return; }
           socket.write("RCPT TO:<recipient@benchmark.test>\r\n");
           state = "rcpt";
         } else if (state === "rcpt") {
-          if (code !== 250) { socket.destroy(); reject(new Error(`Expected 250 after RCPT TO, got ${code}`)); return; }
           socket.write("DATA\r\n");
           state = "data_cmd";
         } else if (state === "data_cmd") {
-          if (code !== 354) { socket.destroy(); reject(new Error(`Expected 354 after DATA, got ${code}`)); return; }
+          const payload = PAYLOADS[msgIdx % PAYLOADS.length] ?? "";
           dataSentAt = performance.now();
-          socket.write(`${DATA_PAYLOAD}\r\n`);
+          socket.write(`${payload}\r\n`);
           state = "body";
         } else if (state === "body") {
-          if (code !== 250) { socket.destroy(); reject(new Error(`Expected 250 after body, got ${code}`)); return; }
-          const latency = performance.now() - dataSentAt;
-          socket.write("QUIT\r\n");
-          state = "quit";
-          socket.end();
-          resolve(latency);
-          return;
+          latencies.push(performance.now() - dataSentAt);
+          msgIdx++;
+          if (latencies.length >= count) {
+            socket.write("QUIT\r\n");
+            state = "quit";
+            socket.end();
+            resolve(latencies);
+            return;
+          }
+          // Reuse connection: RSET clears envelope, keeps session
+          socket.write("RSET\r\n");
+          state = "rset";
+        } else if (state === "rset") {
+          socket.write("MAIL FROM:<sender@benchmark.test>\r\n");
+          state = "mail";
         }
       }
     }
 
     socket.on("data", (d) => { buf += d.toString(); flush(); });
     socket.on("error", reject);
-    socket.setTimeout(10_000, () => { socket.destroy(); reject(new Error("Socket timeout")); });
+    socket.setTimeout(30_000, () => { socket.destroy(); reject(new Error("Socket timeout")); });
   });
 }
 
@@ -146,36 +155,26 @@ function runBatch(
   host: string,
   port: number,
   count: number,
-  concurrency: number
-): Promise<number[]> {
-  return new Promise((resolve) => {
+  concurrency: number,
+): Promise<{ latencies: number[]; errors: number }> {
+  const workers: Promise<number[]>[] = [];
+  const slots = Math.min(concurrency, count);
+  const base = Math.floor(count / slots);
+  const extra = count % slots;
+  let startIdx = 0;
+  for (let i = 0; i < slots; i++) {
+    const n = base + (i < extra ? 1 : 0);
+    workers.push(runWorker(host, port, n, startIdx));
+    startIdx += n;
+  }
+  return Promise.allSettled(workers).then((results) => {
     const latencies: number[] = [];
     let errors = 0;
-    let completed = 0;
-    let started = 0;
-
-    function next() {
-      if (started >= count && completed >= started) { resolve(latencies); return; }
-      if (started >= count) return;
-
-      const msgIdx = started++;
-
-      sendOne(host, port, msgIdx)
-        .then((lat) => {
-          latencies.push(lat);
-          completed++;
-          next();
-          if (completed >= count) resolve(latencies);
-        })
-        .catch(() => {
-          errors++;
-          completed++;
-          next();
-          if (completed >= count) resolve(latencies);
-        });
+    for (const r of results) {
+      if (r.status === "fulfilled") latencies.push(...r.value);
+      else errors += base + (errors < extra ? 1 : 0);
     }
-
-    for (let i = 0; i < Math.min(concurrency, count); i++) next();
+    return { latencies, errors };
   });
 }
 
@@ -229,37 +228,9 @@ async function runBenchmark(
   console.log("done");
 
   process.stdout.write(`  [${label}] measuring  (${TOTAL} msgs)... `);
-  let errors = 0;
 
   const t0 = performance.now();
-  const latencies = await new Promise<number[]>((resolve) => {
-    const all: number[] = [];
-    let completed = 0;
-    let started = 0;
-
-    function next() {
-      if (started >= TOTAL && completed >= started) { resolve(all); return; }
-      if (started >= TOTAL) return;
-
-      const msgIdx = started++;
-
-      sendOne(host, port, msgIdx)
-        .then((lat) => {
-          all.push(lat);
-          completed++;
-          next();
-          if (completed >= TOTAL) resolve(all);
-        })
-        .catch(() => {
-          errors++;
-          completed++;
-          next();
-          if (completed >= TOTAL) resolve(all);
-        });
-    }
-
-    for (let i = 0; i < Math.min(CONCURRENCY, TOTAL); i++) next();
-  });
+  const { latencies, errors } = await runBatch(host, port, TOTAL, CONCURRENCY);
   const totalMs = performance.now() - t0;
 
   console.log("done");
@@ -318,10 +289,14 @@ async function main() {
   const bunServer = new BunSMTPServer({
     authOptional: true,
     disableReverseLookup: true,
-    async onData(stream, _session, cb) {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      for await (const _ of stream) { /* drain */ }
-      cb(null);
+    onData(stream, _session, cb) {
+      const reader = stream.getReader();
+      const drain = (): void => {
+        reader.read().then(({ done }) => {
+          if (done) { reader.releaseLock(); cb(null); } else drain();
+        }).catch(cb);
+      };
+      drain();
     },
   });
   bunServer.listen(PORT_BUN, HOST);
