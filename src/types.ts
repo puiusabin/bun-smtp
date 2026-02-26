@@ -272,6 +272,7 @@ export interface ConnectionContext {
 
   // Timeout
   timeoutHandle: ReturnType<typeof setTimeout> | null;
+  lastActivity: number;
 
   // DATA mode
   dataController: ReadableStreamDefaultController<Uint8Array> | null;
@@ -293,6 +294,7 @@ export interface ServerInstance {
   >> & SMTPServerOptions;
   connections: Set<ConnectionContext>;
   closing: boolean;
+  disabledCommandsSet: Set<string>;
   onConnect: OnConnectCallback;
   onSecure: OnSecureCallback;
   onAuth: OnAuthCallback;

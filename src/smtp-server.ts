@@ -112,6 +112,7 @@ export class SMTPServer implements ServerInstance {
   options: ServerInstance["options"];
   connections: Set<ConnectionContext> = new Set();
   closing = false;
+  disabledCommandsSet: Set<string> = new Set();
   tlsKey: string;
   tlsCert: string;
 
@@ -187,6 +188,9 @@ export class SMTPServer implements ServerInstance {
     };
 
     this.options = { ...defaults, ...options } as ServerInstance["options"];
+    this.disabledCommandsSet = new Set(
+      (this.options.disabledCommands ?? []).map(c => c.toUpperCase())
+    );
 
     // Apply callbacks from options (if provided)
     this.onConnect = options.onConnect ?? defaultOnConnect;
