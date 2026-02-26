@@ -28,8 +28,8 @@ export type DataCallbacks = {
 const END_SEQ = Buffer.from("\r\n.\r\n"); // 5 bytes
 
 export class SMTPParser {
-  // Command mode: partial line not yet terminated by \r\n
-  private _remainder = "";
+  // Command mode: partial bytes not yet terminated by \n
+  private _remainder: Buffer | null = null;
   // Data mode: carry last ≤ 4 bytes across chunk boundaries for terminator detection
   private _lastBytes: Buffer | null = null;
   private _dataMode = false;
@@ -48,19 +48,19 @@ export class SMTPParser {
   feedCommandMode(chunk: Buffer): string[] {
     if (this.isClosed || this._dataMode) return [];
 
-    const data = this._remainder + chunk.toString("binary");
+    const buf = this._remainder ? Buffer.concat([this._remainder, chunk]) : chunk;
     const lines: string[] = [];
     let pos = 0;
-    const newlineRe = /\r?\n/g;
 
-    let match: RegExpExecArray | null;
-    while ((match = newlineRe.exec(data)) !== null) {
-      const line = data.slice(pos, match.index);
-      lines.push(Buffer.from(line, "binary").toString("utf8"));
-      pos = match.index + match[0].length;
+    while (true) {
+      const nl = buf.indexOf(0x0a, pos);
+      if (nl === -1) break;
+      const end = nl > pos && buf[nl - 1] === 0x0d ? nl - 1 : nl;
+      lines.push(buf.subarray(pos, end).toString("utf8"));
+      pos = nl + 1;
     }
 
-    this._remainder = pos < data.length ? data.slice(pos) : "";
+    this._remainder = pos < buf.length ? buf.subarray(pos) : null;
     return lines;
   }
 
@@ -80,9 +80,9 @@ export class SMTPParser {
 
     // Flush any accumulated command-mode remainder into the data stream.
     // (Rare: DATA command and body start in the same TCP packet)
-    if (this._remainder.length > 0) {
-      const buf = Buffer.from(this._remainder, "binary");
-      this._remainder = "";
+    if (this._remainder && this._remainder.length > 0) {
+      const buf = this._remainder;
+      this._remainder = null;
       this._feedDataStream(buf);
     }
   }
@@ -106,10 +106,10 @@ export class SMTPParser {
    * Flush partial command-mode remainder when socket closes.
    */
   flush(): string[] {
-    if (this._remainder && !this.isClosed) {
-      const line = this._remainder;
-      this._remainder = "";
-      return [Buffer.from(line, "binary").toString("utf8")];
+    if (this._remainder && this._remainder.length > 0 && !this.isClosed) {
+      const buf = this._remainder;
+      this._remainder = null;
+      return [buf.toString("utf8")];
     }
     return [];
   }
@@ -131,54 +131,61 @@ export class SMTPParser {
     // (client sent DATA immediately followed by "\r\n.\r\n" or just ".\r\n")
     if (this._dataBytes === 0 && len >= 3 &&
         chunk[0] === 0x2e && chunk[1] === 0x0d && chunk[2] === 0x0a) {
-      this._endDataMode(Buffer.alloc(0), chunk.slice(3));
+      this._endDataMode(Buffer.alloc(0), chunk.subarray(3));
       return;
     }
 
     // Edge case: escape dot ".." at the very start (first data byte, no prior \n)
+    let start = 0;
     if (this._dataBytes === 0 && len >= 2 && chunk[0] === 0x2e && chunk[1] === 0x2e) {
-      chunk = chunk.slice(1);
-      // fall through with reduced chunk
+      start = 1; // skip the escape dot, fall through
     }
 
-    const updatedLen = chunk.length;
-
-    // Main scan: look for \r\n.\r\n or a dot-escape ".." at the start of a line
-    for (let i = 2; i < updatedLen - 2; i++) {
-      // A '.' at position i is "at the start of a line" when preceded by \n
-      if (chunk[i] === 0x2e && chunk[i - 1] === 0x0a) {
-        // Check for the terminator \r\n.\r\n
-        if (Buffer.compare(chunk.slice(i - 2, i + 3), END_SEQ) === 0) {
-          // chunk.slice(0, i) includes the \r\n that terminates the last line
-          this._endDataMode(chunk.slice(0, i), chunk.slice(i + 3));
-          return;
-        }
-
-        // Check for dot-escape: ".." (escape dot followed by content dot)
-        if (chunk[i + 1] === 0x2e) {
-          const before = chunk.slice(0, i);
-          if (before.length > 0) {
-            this._dataBytes += before.length;
-            this._callbacks.onData(before);
+    // Main scan: look for \r\n.\r\n or a dot-escape ".." at the start of a line.
+    // Uses a labeled continue to restart the inner loop after an escape without
+    // allocating a closure (replaces the previous setImmediate recursion).
+    scan: while (true) {
+      const clen = chunk.length;
+      for (let i = start + 2; i < clen - 2; i++) {
+        // A '.' at position i is "at the start of a line" when preceded by \n
+        if (chunk[i] === 0x2e && chunk[i - 1] === 0x0a) {
+          // Check for the terminator \r\n.\r\n
+          if (Buffer.compare(chunk.subarray(i - 2, i + 3), END_SEQ) === 0) {
+            // chunk.subarray(start, i) includes the \r\n that terminates the last line
+            this._endDataMode(chunk.subarray(start, i), chunk.subarray(i + 3));
+            return;
           }
-          // Restart scanning from the content dot (skip the escape dot at i)
-          setImmediate(() => this._feedDataStream(chunk.slice(i + 1)));
-          return;
+
+          // Check for dot-escape: ".." (escape dot followed by content dot)
+          if (chunk[i + 1] === 0x2e) {
+            const before = chunk.subarray(start, i);
+            if (before.length > 0) {
+              this._dataBytes += before.length;
+              this._callbacks.onData(before);
+            }
+            // Skip the escape dot; content dot at i+1 stays in the stream.
+            // After the escape, chunk[i+1] is '.' (not '\n'), so no valid
+            // terminator or escape can begin at i+1 or i+2 — safe to jump to i+3.
+            start = i + 1;
+            continue scan;
+          }
         }
       }
+      break;
     }
 
     // No terminator or escape found. Buffer the last 4 bytes for next chunk.
-    const keepLen = Math.min(4, updatedLen);
-    const emitLen = updatedLen - keepLen;
+    const remaining = chunk.subarray(start);
+    const keepLen = Math.min(4, remaining.length);
+    const emitLen = remaining.length - keepLen;
 
     if (emitLen > 0) {
-      const emit = chunk.slice(0, emitLen);
+      const emit = remaining.subarray(0, emitLen);
       this._dataBytes += emit.length;
       this._callbacks.onData(emit);
     }
 
-    this._lastBytes = chunk.slice(emitLen);
+    this._lastBytes = remaining.subarray(emitLen);
   }
 
   private _endDataMode(dataChunk: Buffer, remainder: Buffer): void {
