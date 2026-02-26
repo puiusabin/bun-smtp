@@ -115,6 +115,7 @@ export function createContext(server: ServerInstance, socket: Socket<ConnectionC
     xForward: session.xForward,
     tlsOptions: false,
     timeoutHandle: null,
+    lastActivity: 0,
     dataController: null,
     dataStream: null,
     dataBytes: 0,
@@ -192,10 +193,12 @@ export function enqueueChunk(ctx: ConnectionContext, raw: Buffer): void {
 }
 
 async function drainChunks(ctx: ConnectionContext): Promise<void> {
-  while (ctx.pendingChunks.length > 0) {
-    const chunk = ctx.pendingChunks.shift()!;
-    await processChunk(ctx, chunk);
+  let i = 0;
+  while (i < ctx.pendingChunks.length) {
+    await processChunk(ctx, ctx.pendingChunks[i]!);
+    i++;
   }
+  ctx.pendingChunks.length = 0;
   ctx.processing = false;
 }
 
@@ -978,10 +981,22 @@ export function handleError(ctx: ConnectionContext, err: SMTPError): void {
 // ---- Timeout ---------------------------------------------------------------
 
 function resetTimeout(ctx: ConnectionContext): void {
-  if (ctx.timeoutHandle) clearTimeout(ctx.timeoutHandle);
-  ctx.timeoutHandle = setTimeout(() => {
+  ctx.lastActivity = Date.now();
+  if (!ctx.timeoutHandle) {
+    ctx.timeoutHandle = setTimeout(() => tickTimeout(ctx), ctx.server.options.socketTimeout ?? SOCKET_TIMEOUT);
+  }
+}
+
+function tickTimeout(ctx: ConnectionContext): void {
+  ctx.timeoutHandle = null;
+  if (ctx.closed || ctx.closing) return;
+  const socketTimeout = ctx.server.options.socketTimeout ?? SOCKET_TIMEOUT;
+  const remaining = socketTimeout - (Date.now() - ctx.lastActivity);
+  if (remaining <= 0) {
     sendRaw(ctx, buildResponse(ctx, 421, "Timeout - closing connection"));
-  }, ctx.server.options.socketTimeout ?? SOCKET_TIMEOUT);
+  } else {
+    ctx.timeoutHandle = setTimeout(() => tickTimeout(ctx), remaining);
+  }
 }
 
 // ---- Reverse DNS -----------------------------------------------------------
