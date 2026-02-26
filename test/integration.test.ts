@@ -426,8 +426,7 @@ describe("onMailFrom / onRcptTo callbacks", () => {
 				capturedAddress = addr.address;
 				capturedSize =
 					((addr.args &&
-						(addr.args as Record<string, unknown>).SIZE) as string) ||
-					"";
+						(addr.args as Record<string, unknown>).SIZE) as string) || "";
 				cb();
 			},
 		});
