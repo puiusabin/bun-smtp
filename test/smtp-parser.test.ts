@@ -217,6 +217,6 @@ describe("SMTPParser – post-terminator remainder", () => {
 		});
 
 		expect(remainder).not.toBeNull();
-		expect(remainder?.toString()).toBe("RSET\r\n");
+		expect((remainder as unknown as Buffer).toString()).toBe("RSET\r\n");
 	});
 });
