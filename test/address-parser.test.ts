@@ -80,7 +80,7 @@ describe("parseAddressCommand – RCPT TO", () => {
 			"RCPT TO:<a@b.com> NOTIFY=SUCCESS,FAILURE",
 		);
 		expect(r).not.toBe(false);
-		if (r && r.args) {
+		if (r !== false && r.args) {
 			expect((r.args as Record<string, unknown>).NOTIFY).toBe(
 				"SUCCESS,FAILURE",
 			);
@@ -93,7 +93,7 @@ describe("parseAddressCommand – RCPT TO", () => {
 			"RCPT TO:<a@b.com> ORCPT=rfc822;original@example.com",
 		);
 		expect(r).not.toBe(false);
-		if (r && r.args) {
+		if (r !== false && r.args) {
 			expect((r.args as Record<string, unknown>).ORCPT).toBe(
 				"rfc822;original@example.com",
 			);
