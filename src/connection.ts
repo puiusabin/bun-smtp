@@ -37,6 +37,13 @@ const CONTEXTUAL_STATUS_CODES: Record<string, string> = {
 
 const SKIPPED_ENHANCED_COMMANDS = new Set(["HELO", "EHLO", "LHLO"]);
 
+// Pre-built strings for the most frequent SMTP replies (hideENHANCEDSTATUSCODES=false path).
+const R_MAIL_OK  = "250 2.1.0 Accepted\r\n";
+const R_RCPT_OK  = "250 2.1.5 Accepted\r\n";
+const R_DATA_354 = "354 End data with <CR><LF>.<CR><LF>\r\n";
+const R_DATA_OK  = "250 2.6.0 OK: message queued\r\n";
+const R_RSET_OK  = "250 2.0.0 Flushed\r\n";
+
 // ---- Factory ---------------------------------------------------------------
 
 export function createContext(server: ServerInstance, socket: Socket<ConnectionContext>): ConnectionContext {
@@ -177,7 +184,7 @@ async function connectionReady(ctx: ConnectionContext): Promise<void> {
 // ---- Chunk processing queue -------------------------------------------------
 
 export function enqueueChunk(ctx: ConnectionContext, raw: Buffer): void {
-  ctx.pendingChunks.push(Buffer.from(raw)); // copy: Bun may reuse the underlying buffer
+  ctx.pendingChunks.push(raw); // caller already owns this buffer (copied at socket.data)
   if (!ctx.processing) {
     ctx.processing = true;
     void drainChunks(ctx);
@@ -234,7 +241,9 @@ async function processLine(ctx: ConnectionContext, line: string): Promise<void> 
     return;
   }
 
-  const commandName = line.trim().split(/\s+/)[0]?.toUpperCase() ?? "";
+  const trimmed = line.trim();
+  const sp = trimmed.indexOf(" ");
+  const commandName = (sp === -1 ? trimmed : trimmed.slice(0, sp)).toUpperCase();
 
   // Server shutting down
   if (ctx.server.closing) {
@@ -459,7 +468,7 @@ const HANDLERS: Record<string, Handler> = {
   },
 
   async AUTH(ctx, line) {
-    const parts = line.trim().split(/\s+/);
+    const parts = line.trim().split(" ");
     parts.shift(); // remove "AUTH"
     const method = (parts.shift() ?? "").toUpperCase();
     const args = parts;
@@ -536,7 +545,7 @@ const HANDLERS: Record<string, Handler> = {
           return;
         }
         ctx.session.envelope.mailFrom = parsed;
-        sendRaw(ctx, buildResponse(ctx, 250, "Accepted", "MAIL_FROM_OK"));
+        sendRaw(ctx, ctx.server.options.hideENHANCEDSTATUSCODES ? buildResponse(ctx, 250, "Accepted", "MAIL_FROM_OK") : R_MAIL_OK);
         resolve();
       });
     });
@@ -600,7 +609,7 @@ const HANDLERS: Record<string, Handler> = {
           ctx.session.envelope.rcptTo.push(parsed);
         }
 
-        sendRaw(ctx, buildResponse(ctx, 250, "Accepted", "RCPT_TO_OK"));
+        sendRaw(ctx, ctx.server.options.hideENHANCEDSTATUSCODES ? buildResponse(ctx, 250, "Accepted", "RCPT_TO_OK") : R_RCPT_OK);
         resolve();
       });
     });
@@ -612,7 +621,7 @@ const HANDLERS: Record<string, Handler> = {
       return;
     }
 
-    sendRaw(ctx, buildResponse(ctx, 354, "End data with <CR><LF>.<CR><LF>"));
+    sendRaw(ctx, R_DATA_354);
 
     // Create a ReadableStream backed by the dot-unstuffer
     let controller!: ReadableStreamDefaultController<Uint8Array>;
@@ -670,7 +679,9 @@ const HANDLERS: Record<string, Handler> = {
             sendRaw(ctx, buildResponse(ctx, 250, typeof message === "string" ? message : "OK: message accepted", "DATA_OK"));
           }
         } else {
-          sendRaw(ctx, buildResponse(ctx, 250, typeof message === "string" ? message : "OK: message queued", "DATA_OK"));
+          sendRaw(ctx, typeof message === "string"
+            ? buildResponse(ctx, 250, message, "DATA_OK")
+            : ctx.server.options.hideENHANCEDSTATUSCODES ? buildResponse(ctx, 250, "OK: message queued", "DATA_OK") : R_DATA_OK);
         }
 
         ctx.transactionCounter++;
@@ -683,7 +694,7 @@ const HANDLERS: Record<string, Handler> = {
 
   RSET(ctx) {
     resetSession(ctx);
-    sendRaw(ctx, buildResponse(ctx, 250, "Flushed"));
+    sendRaw(ctx, ctx.server.options.hideENHANCEDSTATUSCODES ? buildResponse(ctx, 250, "Flushed") : R_RSET_OK);
   },
 
   NOOP(ctx) {
