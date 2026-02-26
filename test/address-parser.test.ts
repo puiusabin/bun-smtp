@@ -48,7 +48,7 @@ describe("parseAddressCommand – MAIL FROM", () => {
 			"MAIL FROM:<a@b.com> SIZE=100 BODY=7BIT",
 		);
 		expect(r).not.toBe(false);
-		if (r?.args) {
+		if (r !== false && r.args) {
 			const args = r.args as Record<string, unknown>;
 			expect(args.SIZE).toBe("100");
 			expect(args.BODY).toBe("7BIT");
@@ -62,7 +62,7 @@ describe("parseAddressCommand – MAIL FROM", () => {
 			"MAIL FROM:<a@b.com> ENVID=foo+2Bbar",
 		);
 		expect(r).not.toBe(false);
-		if (r?.args) {
+		if (r !== false && r.args) {
 			expect((r.args as Record<string, unknown>).ENVID).toBe("foo+bar");
 		}
 	});
