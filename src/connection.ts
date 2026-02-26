@@ -36,13 +36,24 @@ const CONTEXTUAL_STATUS_CODES: Record<string, string> = {
 };
 
 const SKIPPED_ENHANCED_COMMANDS = new Set(["HELO", "EHLO", "LHLO"]);
+const COMMANDS_REQUIRING_HELO = new Set(["MAIL", "RCPT", "DATA", "AUTH"]);
+const COMMANDS_REQUIRING_AUTH = new Set(["MAIL", "RCPT", "DATA"]);
 
-// Pre-built strings for the most frequent SMTP replies (hideENHANCEDSTATUSCODES=false path).
-const R_MAIL_OK  = "250 2.1.0 Accepted\r\n";
-const R_RCPT_OK  = "250 2.1.5 Accepted\r\n";
-const R_DATA_354 = "354 End data with <CR><LF>.<CR><LF>\r\n";
-const R_DATA_OK  = "250 2.6.0 OK: message queued\r\n";
-const R_RSET_OK  = "250 2.0.0 Flushed\r\n";
+// Pre-built strings for the most frequent SMTP replies.
+// ENH variants: hideENHANCEDSTATUSCODES=false. PLAIN variants: default (=true).
+const R_MAIL_OK       = "250 2.1.0 Accepted\r\n";
+const R_MAIL_OK_PLAIN = "250 Accepted\r\n";
+const R_RCPT_OK       = "250 2.1.5 Accepted\r\n";
+const R_RCPT_OK_PLAIN = "250 Accepted\r\n";
+const R_DATA_354      = "354 End data with <CR><LF>.<CR><LF>\r\n";
+const R_DATA_OK       = "250 2.6.0 OK: message queued\r\n";
+const R_DATA_OK_PLAIN = "250 OK: message queued\r\n";
+const R_RSET_OK       = "250 2.0.0 Flushed\r\n";
+const R_RSET_OK_PLAIN = "250 Flushed\r\n";
+const R_NOOP_OK       = "250 OK\r\n";
+const R_NOOP_OK_ENH   = "250 2.0.0 OK\r\n";
+const R_QUIT          = "221 Bye\r\n";
+const R_QUIT_ENH      = "221 2.0.0 Bye\r\n";
 
 // ---- Factory ---------------------------------------------------------------
 
@@ -229,7 +240,7 @@ async function processLine(ctx: ConnectionContext, line: string): Promise<void> 
   }
 
   // Block HTTP requests (web page AJAX attacks)
-  if (/^(OPTIONS|GET|HEAD|POST|PUT|DELETE|TRACE|CONNECT) \/.* HTTP\/\d\.\d$/i.test(line)) {
+  if (line.includes(" /") && /^(OPTIONS|GET|HEAD|POST|PUT|DELETE|TRACE|CONNECT) \/.* HTTP\/\d\.\d$/i.test(line)) {
     sendRaw(ctx, buildResponse(ctx, 421, "HTTP requests not allowed"));
     return;
   }
@@ -244,7 +255,9 @@ async function processLine(ctx: ConnectionContext, line: string): Promise<void> 
     return;
   }
 
-  const trimmed = line.trim();
+  const firstCode = line.charCodeAt(0);
+  const lastCode = line.charCodeAt(line.length - 1);
+  const trimmed = (firstCode <= 0x20 || lastCode <= 0x20) ? line.trim() : line;
   const sp = trimmed.indexOf(" ");
   const commandName = (sp === -1 ? trimmed : trimmed.slice(0, sp)).toUpperCase();
 
@@ -299,7 +312,7 @@ async function processLine(ctx: ConnectionContext, line: string): Promise<void> 
   }
 
   // Require HELO/EHLO before MAIL/RCPT/DATA/AUTH
-  if (!ctx.hostNameAppearsAs && ["MAIL", "RCPT", "DATA", "AUTH"].includes(effectiveCommand)) {
+  if (!ctx.hostNameAppearsAs && COMMANDS_REQUIRING_HELO.has(effectiveCommand)) {
     sendRaw(ctx, buildResponse(ctx, 503, `Error: send ${ctx.server.options.lmtp ? "LHLO" : "HELO/EHLO"} first`));
     return;
   }
@@ -308,7 +321,7 @@ async function processLine(ctx: ConnectionContext, line: string): Promise<void> 
   if (
     !ctx.session.user &&
     isSupported(ctx, "AUTH") &&
-    ["MAIL", "RCPT", "DATA"].includes(effectiveCommand) &&
+    COMMANDS_REQUIRING_AUTH.has(effectiveCommand) &&
     !ctx.server.options.authOptional
   ) {
     const msg = typeof ctx.server.options.authRequiredMessage === "string"
@@ -331,21 +344,21 @@ function getHandler(ctx: ConnectionContext, command: string): Handler | null {
 }
 
 function isSupported(ctx: ConnectionContext, command: string): boolean {
-  const disabled = ctx.server.options.disabledCommands;
-  if (disabled.includes(command)) return false;
+  if (ctx.server.disabledCommandsSet.has(command)) return false;
   return command in HANDLERS;
 }
 
 const HANDLERS: Record<string, Handler> = {
 
   EHLO(ctx, line) {
-    const parts = line.trim().split(/\s+/);
-    if (parts.length !== 2) {
+    const t = line.trim();
+    const sp = t.indexOf(" ");
+    if (sp === -1) {
       sendRaw(ctx, buildResponse(ctx, 501, `Error: syntax: ${ctx.server.options.lmtp ? "LHLO" : "EHLO"} hostname`));
       return;
     }
 
-    ctx.hostNameAppearsAs = (parts[1] ?? "").toLowerCase();
+    ctx.hostNameAppearsAs = t.slice(sp + 1).trim().toLowerCase();
     ctx.session.hostNameAppearsAs = ctx.hostNameAppearsAs;
 
     const features: string[] = [];
@@ -387,29 +400,42 @@ const HANDLERS: Record<string, Handler> = {
     resetSession(ctx);
 
     const heloFmt = ctx.server.options.heloResponse || "%s Nice to meet you, %s";
-    const replacements = [ctx.name, ctx.clientHostname];
-    let repIdx = 0;
-    const heloMsg = heloFmt.replace(/%s/g, () => replacements[repIdx++] ?? "");
+    let heloMsg = heloFmt;
+    const p1 = heloFmt.indexOf("%s");
+    if (p1 !== -1) {
+      heloMsg = heloFmt.slice(0, p1) + ctx.name + heloFmt.slice(p1 + 2);
+      const p2 = heloMsg.indexOf("%s");
+      if (p2 !== -1) {
+        heloMsg = heloMsg.slice(0, p2) + ctx.clientHostname + heloMsg.slice(p2 + 2);
+      }
+    }
 
     sendRaw(ctx, buildMultiResponse(ctx, 250, [heloMsg, ...features], false));
   },
 
   HELO(ctx, line) {
-    const parts = line.trim().split(/\s+/);
-    if (parts.length !== 2) {
+    const t = line.trim();
+    const sp = t.indexOf(" ");
+    if (sp === -1) {
       sendRaw(ctx, buildResponse(ctx, 501, "Error: Syntax: HELO hostname"));
       return;
     }
 
-    ctx.hostNameAppearsAs = (parts[1] ?? "").toLowerCase();
+    ctx.hostNameAppearsAs = t.slice(sp + 1).trim().toLowerCase();
     ctx.session.hostNameAppearsAs = ctx.hostNameAppearsAs;
 
     resetSession(ctx);
 
     const heloFmt = ctx.server.options.heloResponse || "%s Nice to meet you, %s";
-    const replacements = [ctx.name, ctx.clientHostname];
-    let repIdx = 0;
-    const heloMsg = heloFmt.replace(/%s/g, () => replacements[repIdx++] ?? "");
+    let heloMsg = heloFmt;
+    const p1 = heloFmt.indexOf("%s");
+    if (p1 !== -1) {
+      heloMsg = heloFmt.slice(0, p1) + ctx.name + heloFmt.slice(p1 + 2);
+      const p2 = heloMsg.indexOf("%s");
+      if (p2 !== -1) {
+        heloMsg = heloMsg.slice(0, p2) + ctx.clientHostname + heloMsg.slice(p2 + 2);
+      }
+    }
 
     sendRaw(ctx, buildResponse(ctx, 250, heloMsg, false));
   },
@@ -548,7 +574,7 @@ const HANDLERS: Record<string, Handler> = {
           return;
         }
         ctx.session.envelope.mailFrom = parsed;
-        sendRaw(ctx, ctx.server.options.hideENHANCEDSTATUSCODES ? buildResponse(ctx, 250, "Accepted", "MAIL_FROM_OK") : R_MAIL_OK);
+        sendRaw(ctx, ctx.server.options.hideENHANCEDSTATUSCODES ? R_MAIL_OK_PLAIN : R_MAIL_OK);
         resolve();
       });
     });
@@ -612,7 +638,7 @@ const HANDLERS: Record<string, Handler> = {
           ctx.session.envelope.rcptTo.push(parsed);
         }
 
-        sendRaw(ctx, ctx.server.options.hideENHANCEDSTATUSCODES ? buildResponse(ctx, 250, "Accepted", "RCPT_TO_OK") : R_RCPT_OK);
+        sendRaw(ctx, ctx.server.options.hideENHANCEDSTATUSCODES ? R_RCPT_OK_PLAIN : R_RCPT_OK);
         resolve();
       });
     });
@@ -684,7 +710,7 @@ const HANDLERS: Record<string, Handler> = {
         } else {
           sendRaw(ctx, typeof message === "string"
             ? buildResponse(ctx, 250, message, "DATA_OK")
-            : ctx.server.options.hideENHANCEDSTATUSCODES ? buildResponse(ctx, 250, "OK: message queued", "DATA_OK") : R_DATA_OK);
+            : ctx.server.options.hideENHANCEDSTATUSCODES ? R_DATA_OK_PLAIN : R_DATA_OK);
         }
 
         ctx.transactionCounter++;
@@ -697,15 +723,15 @@ const HANDLERS: Record<string, Handler> = {
 
   RSET(ctx) {
     resetSession(ctx);
-    sendRaw(ctx, ctx.server.options.hideENHANCEDSTATUSCODES ? buildResponse(ctx, 250, "Flushed") : R_RSET_OK);
+    sendRaw(ctx, ctx.server.options.hideENHANCEDSTATUSCODES ? R_RSET_OK_PLAIN : R_RSET_OK);
   },
 
   NOOP(ctx) {
-    sendRaw(ctx, buildResponse(ctx, 250, "OK"));
+    sendRaw(ctx, ctx.server.options.hideENHANCEDSTATUSCODES ? R_NOOP_OK : R_NOOP_OK_ENH);
   },
 
   QUIT(ctx) {
-    sendRaw(ctx, buildResponse(ctx, 221, "Bye"));
+    sendRaw(ctx, ctx.server.options.hideENHANCEDSTATUSCODES ? R_QUIT : R_QUIT_ENH);
     closeSocket(ctx);
   },
 
@@ -873,10 +899,17 @@ function getEnhancedCode(ctx: ConnectionContext, code: number, context?: string 
 
 function buildResponse(ctx: ConnectionContext, code: number, message = "", context?: string | false): string {
   const enh = getEnhancedCode(ctx, code, context);
-  const parts: string[] = [String(code)];
-  if (enh) parts.push(enh);
-  if (message) parts.push(message);
-  const payload = parts.join(" ");
+  const codeStr = String(code);
+  let payload: string;
+  if (enh && message) {
+    payload = codeStr + " " + enh + " " + message;
+  } else if (enh) {
+    payload = codeStr + " " + enh;
+  } else if (message) {
+    payload = codeStr + " " + message;
+  } else {
+    payload = codeStr;
+  }
 
   if (code >= 400) ctx.session.error = payload;
   if (code === 334 && payload === "334") return "334 \r\n";
