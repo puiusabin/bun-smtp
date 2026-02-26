@@ -26,6 +26,7 @@ export type DataCallbacks = {
 };
 
 const END_SEQ = Buffer.from("\r\n.\r\n"); // 5 bytes
+const EMPTY_BUFFER = Buffer.alloc(0);
 
 export class SMTPParser {
   // Command mode: partial bytes not yet terminated by \n
@@ -131,7 +132,7 @@ export class SMTPParser {
     // (client sent DATA immediately followed by "\r\n.\r\n" or just ".\r\n")
     if (this._dataBytes === 0 && len >= 3 &&
         chunk[0] === 0x2e && chunk[1] === 0x0d && chunk[2] === 0x0a) {
-      this._endDataMode(Buffer.alloc(0), chunk.subarray(3));
+      this._endDataMode(EMPTY_BUFFER, chunk.subarray(3));
       return;
     }
 
