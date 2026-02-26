@@ -200,7 +200,6 @@ export function initConnection(ctx: ConnectionContext): void {
 
 	// 100ms early-talker delay
 	const t = setTimeout(() => connectionReady(ctx), 100);
-	// @ts-expect-error - unref not typed in bun-types but it works
 	if (typeof t.unref === "function") t.unref();
 }
 
@@ -1415,7 +1414,6 @@ async function reverseResolve(ctx: ConnectionContext): Promise<string> {
 			doReverse(ctx),
 			new Promise<string[]>((_, reject) => {
 				const t = setTimeout(() => reject(new Error("Timeout")), timeoutMs);
-				// @ts-expect-error
 				if (typeof t.unref === "function") t.unref();
 			}),
 		]);
