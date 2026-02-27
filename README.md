@@ -43,7 +43,7 @@ bun add bun-smtp
 ## Features
 
 - **Bun-native** 🚀 - Uses `Bun.listen()`, `socket.upgradeTLS()`, and `Bun.CryptoHasher`. No Node.js compat layer.
-**Drop-in replacement** 🔄 - Same constructor options, callbacks, and event names as `smtp-server`. Minimal migration effort.
+- **Drop-in replacement** 🔄 - Same constructor options, callbacks, and event names as `smtp-server`. Minimal migration effort.
 - **Full SMTP support** 📨 - HELO, EHLO, MAIL FROM, RCPT TO, DATA, STARTTLS, LMTP, and more.
 - **SASL auth** 🔐 - PLAIN, LOGIN, CRAM-MD5, and XOAUTH2 out of the box.
 
