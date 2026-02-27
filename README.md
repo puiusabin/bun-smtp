@@ -1,102 +1,68 @@
-# bun-smtp
+<div align="center">
+  <h1>bun-smtp</h1>
+</div>
 
-A drop-in replacement for the [smtp-server](https://www.npmjs.com/package/smtp-server) npm package, rewritten to run on Bun.
+<hr />
 
-The public API is identical: same constructor options, same callbacks, same event names. The main difference is that the DATA stream is a `ReadableStream<Uint8Array>` instead of a Node.js stream, and it requires Bun >= 1.2.0.
+[![Build](https://img.shields.io/github/actions/workflow/status/puiusabin/bun-smtp/ci.yml?branch=main&label=build)](https://github.com/puiusabin/bun-smtp/actions)
+[![npm](https://img.shields.io/npm/v/bun-smtp)](https://www.npmjs.com/package/bun-smtp)
+[![npm](https://img.shields.io/npm/dm/bun-smtp)](https://www.npmjs.com/package/bun-smtp)
+[![GitHub](https://img.shields.io/github/license/puiusabin/bun-smtp)](https://github.com/puiusabin/bun-smtp/blob/main/LICENSE)
+[![npm bundle size](https://img.shields.io/npm/unpacked-size/bun-smtp)](https://www.npmjs.com/package/bun-smtp)
+[![GitHub commit activity](https://img.shields.io/github/commit-activity/m/puiusabin/bun-smtp)](https://github.com/puiusabin/bun-smtp/pulse)
+[![GitHub last commit](https://img.shields.io/github/last-commit/puiusabin/bun-smtp)](https://github.com/puiusabin/bun-smtp/commits/main)
 
-## Installation
+A drop-in replacement for [smtp-server](https://www.npmjs.com/package/smtp-server), rewritten to run on Bun.
 
-```bash
-bun add bun-smtp
-```
-
-TypeScript users also need `@types/bun`:
-
-```bash
-bun add -d @types/bun
-```
-
-## Quick start
-
-```typescript
+```ts
 import { SMTPServer } from "bun-smtp";
 
 const server = new SMTPServer({
   authOptional: true,
   onData(stream, session, callback) {
-    const chunks: Uint8Array[] = [];
-    const reader = stream.getReader();
-
-    async function read() {
-      const { done, value } = await reader.read();
-      if (done) {
-        const message = Buffer.concat(chunks).toString();
-        console.log("Received message:", stream.byteLength, "bytes");
-        callback(null);
-      } else {
-        chunks.push(value);
-        read();
+    async function drain() {
+      const chunks: Uint8Array[] = [];
+      for await (const chunk of stream) {
+        chunks.push(chunk);
       }
+      callback(null);
     }
-
-    read();
+    drain().catch(callback);
   },
 });
 
-server.listen(2525, "0.0.0.0", () => {
-  console.log("Listening on port 2525");
-});
+await server.listen(2525);
 ```
 
-You can also consume the DATA stream with `for await`:
+## Quick Start
 
-```typescript
-onData(stream, session, callback) {
-  async function drain() {
-    const chunks: Uint8Array[] = [];
-    for await (const chunk of stream) {
-      chunks.push(chunk);
-    }
-    const message = Buffer.concat(chunks).toString();
-    callback(null);
-  }
-  drain().catch(callback);
-}
+```sh
+bun add bun-smtp
 ```
 
-## Differences from smtp-server
+## Features
 
-**Runtime.** `bun-smtp` requires Bun >= 1.2.0. It will not run on Node.js. The internals use `Bun.listen()` for TCP, `socket.upgradeTLS()` for STARTTLS, and `Bun.CryptoHasher` for CRAM-MD5.
+- **Drop-in replacement** 🔄 - Same constructor options, callbacks, and event names as `smtp-server`. Minimal migration effort.
+- **Bun-native** 🚀 - Uses `Bun.listen()`, `socket.upgradeTLS()`, and `Bun.CryptoHasher`. No Node.js compat layer.
+- **Full SMTP support** 📨 - HELO, EHLO, MAIL FROM, RCPT TO, DATA, STARTTLS, LMTP, and more.
+- **SASL auth** 🔐 - PLAIN, LOGIN, CRAM-MD5, and XOAUTH2 out of the box.
+- **TypeScript first** 🟦 - Fully typed. Exports all types from `smtp-server`'s public API.
 
-**DATA stream type.** The original `smtp-server` passes a Node.js `PassThrough` stream to `onData`. `bun-smtp` passes a `ReadableStream<Uint8Array>`. The stream also has two extra properties set after it closes:
+## Documentation
 
-- `stream.byteLength` - total bytes received (set after the stream ends)
-- `stream.sizeExceeded` - `true` if the message exceeded the `size` limit
+Full docs coming soon.
 
-Any code that calls `.pipe()`, `.on("data", ...)`, or other Node.js stream methods will need to be updated to use the Web Streams API.
+## Contributing
 
-**TypeScript peer dependency.** Add `@types/bun` to your devDependencies. The `Socket` type in callback signatures comes from there.
+Contributions welcome.
 
-Everything else, including all constructor options, callback signatures, event names, and SMTP behavior, matches the original package.
+- Open an issue to propose a feature or report a bug.
+- Open a pull request to fix a bug or improve docs.
 
-## Supported features
+## Authors
 
-- HELO, EHLO, MAIL FROM, RCPT TO, DATA, NOOP, RSET, QUIT, STARTTLS
-- LMTP mode (`lmtp: true`)
-- SASL auth: PLAIN, LOGIN, CRAM-MD5, XOAUTH2
-- TLS (immediate TLS on connect via `secure: true`, or STARTTLS upgrade via `needsUpgrade: true`)
-- XCLIENT / XFORWARD proxy headers
-- DSN envelope parameters
-- Per-connection limits: `maxClients`, `socketTimeout`, `size`, `maxAllowedUnauthenticatedCommands`
-
-## API reference
-
-The full API is documented in the [smtp-server README](https://github.com/nodemailer/smtp-server#readme). All options and callbacks described there work the same way in `bun-smtp`, with the DATA stream exception noted above.
-
-## Requirements
-
-- Bun >= 1.2.0
+Sabin Puiu <https://github.com/puiusabin>
 
 ## License
 
-MIT
+Distributed under the MIT License. See [LICENSE](LICENSE) for more information.
