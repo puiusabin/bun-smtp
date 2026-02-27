@@ -1,18 +1,42 @@
 {
 	"name": "bun-smtp",
 	"version": "0.1.0",
-	"module": "index.ts",
-	"main": "index.ts",
+	"description": "Drop-in Bun replacement for the smtp-server npm package",
+	"license": "MIT",
+	"author": "Sabin Puiu",
+	"homepage": "https://github.com/puiusabin/bun-smtp",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/puiusabin/bun-smtp.git"
+	},
+	"bugs": {
+		"url": "https://github.com/puiusabin/bun-smtp/issues"
+	},
+	"keywords": ["smtp", "bun", "email", "server", "starttls", "sasl"],
 	"type": "module",
+	"main": "./dist/index.js",
+	"module": "./dist/index.js",
+	"types": "./dist/index.d.ts",
 	"exports": {
-		".": "./index.ts"
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js",
+			"default": "./dist/index.js"
+		}
+	},
+	"files": ["dist", "README.md", "LICENSE"],
+	"engines": {
+		"bun": ">=1.2.0"
+	},
+	"scripts": {
+		"build": "bun build ./index.ts --outdir ./dist --format esm --target bun && bunx tsc -p tsconfig.build.json",
+		"prepublishOnly": "bun run build",
+		"test": "bun test",
+		"typecheck": "bunx tsc --noEmit"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.4.4",
 		"@types/bun": "latest",
 		"smtp-server": "^3.18.1"
-	},
-	"peerDependencies": {
-		"typescript": "^5"
 	}
 }
