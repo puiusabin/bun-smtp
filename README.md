@@ -43,8 +43,10 @@ bun add bun-smtp
 ## Features
 
 - **Bun-native** 🚀 - Uses `Bun.listen()`, `socket.upgradeTLS()`, and `Bun.CryptoHasher`. No Node.js compat layer.
+**Drop-in replacement** 🔄 - Same constructor options, callbacks, and event names as `smtp-server`. Minimal migration effort.
 - **Full SMTP support** 📨 - HELO, EHLO, MAIL FROM, RCPT TO, DATA, STARTTLS, LMTP, and more.
 - **SASL auth** 🔐 - PLAIN, LOGIN, CRAM-MD5, and XOAUTH2 out of the box.
+
 - **TypeScript first** 🟦 - Fully typed API with strong types throughout.
 
 ## Documentation
@@ -57,10 +59,6 @@ Contributions welcome.
 
 - Open an issue to propose a feature or report a bug.
 - Open a pull request to fix a bug or improve docs.
-
-## Credits
-
-bun-smtp is API-compatible with [smtp-server](https://github.com/nodemailer/smtp-server) by [Nodemailer](https://nodemailer.com/). The constructor options, callbacks, and event names are intentionally identical, making migration straightforward if you are already using it.
 
 ## Authors
 
