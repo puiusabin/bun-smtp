@@ -7,7 +7,7 @@
 	"homepage": "https://github.com/puiusabin/bun-smtp",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/puiusabin/bun-smtp.git"
+		"url": "git+https://github.com/puiusabin/bun-smtp.git"
 	},
 	"bugs": {
 		"url": "https://github.com/puiusabin/bun-smtp/issues"
