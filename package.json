@@ -12,7 +12,14 @@
 	"bugs": {
 		"url": "https://github.com/puiusabin/bun-smtp/issues"
 	},
-	"keywords": ["smtp", "bun", "email", "server", "starttls", "sasl"],
+	"keywords": [
+		"smtp",
+		"bun",
+		"email",
+		"server",
+		"starttls",
+		"sasl"
+	],
 	"type": "module",
 	"main": "./dist/index.js",
 	"module": "./dist/index.js",
@@ -24,7 +31,11 @@
 			"default": "./dist/index.js"
 		}
 	},
-	"files": ["dist", "README.md", "LICENSE"],
+	"files": [
+		"dist",
+		"README.md",
+		"LICENSE"
+	],
 	"engines": {
 		"bun": ">=1.2.0"
 	},
