@@ -1,7 +1,7 @@
 {
 	"name": "bun-smtp",
 	"version": "0.1.0",
-	"description": "Drop-in Bun replacement for the smtp-server npm package",
+	"description": "A fast, lightweight SMTP server library for Bun",
 	"license": "MIT",
 	"author": "Sabin Puiu",
 	"homepage": "https://github.com/puiusabin/bun-smtp",

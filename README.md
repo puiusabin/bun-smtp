@@ -12,7 +12,7 @@
 [![GitHub commit activity](https://img.shields.io/github/commit-activity/m/puiusabin/bun-smtp)](https://github.com/puiusabin/bun-smtp/pulse)
 [![GitHub last commit](https://img.shields.io/github/last-commit/puiusabin/bun-smtp)](https://github.com/puiusabin/bun-smtp/commits/main)
 
-A drop-in replacement for [smtp-server](https://www.npmjs.com/package/smtp-server), rewritten to run on Bun.
+A fast, lightweight SMTP server library built natively on Bun.
 
 ```ts
 import { SMTPServer } from "bun-smtp";
@@ -42,11 +42,10 @@ bun add bun-smtp
 
 ## Features
 
-- **Drop-in replacement** 🔄 - Same constructor options, callbacks, and event names as `smtp-server`. Minimal migration effort.
 - **Bun-native** 🚀 - Uses `Bun.listen()`, `socket.upgradeTLS()`, and `Bun.CryptoHasher`. No Node.js compat layer.
 - **Full SMTP support** 📨 - HELO, EHLO, MAIL FROM, RCPT TO, DATA, STARTTLS, LMTP, and more.
 - **SASL auth** 🔐 - PLAIN, LOGIN, CRAM-MD5, and XOAUTH2 out of the box.
-- **TypeScript first** 🟦 - Fully typed. Exports all types from `smtp-server`'s public API.
+- **TypeScript first** 🟦 - Fully typed API with strong types throughout.
 
 ## Documentation
 
@@ -58,6 +57,10 @@ Contributions welcome.
 
 - Open an issue to propose a feature or report a bug.
 - Open a pull request to fix a bug or improve docs.
+
+## Credits
+
+bun-smtp is API-compatible with [smtp-server](https://github.com/nodemailer/smtp-server) by [Nodemailer](https://nodemailer.com/). The constructor options, callbacks, and event names are intentionally identical, making migration straightforward if you are already using it.
 
 ## Authors
 
