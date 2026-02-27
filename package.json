@@ -47,7 +47,6 @@
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.4.4",
-		"@types/bun": "latest",
-		"smtp-server": "^3.18.1"
+		"@types/bun": "latest"
 	}
 }
