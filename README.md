@@ -12,7 +12,7 @@
 [![GitHub commit activity](https://img.shields.io/github/commit-activity/m/puiusabin/bun-smtp)](https://github.com/puiusabin/bun-smtp/pulse)
 [![GitHub last commit](https://img.shields.io/github/last-commit/puiusabin/bun-smtp)](https://github.com/puiusabin/bun-smtp/commits/main)
 
-A fast, lightweight SMTP server library built natively on Bun.
+A fast SMTP/LMTP server library built natively on Bun.
 
 ```ts
 import { SMTPServer } from "bun-smtp";

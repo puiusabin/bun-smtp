@@ -1,7 +1,7 @@
 {
 	"name": "bun-smtp",
 	"version": "0.1.0",
-	"description": "A fast, lightweight SMTP server library for Bun",
+	"description": "A fast SMTP/LMTP server library for Bun",
 	"license": "MIT",
 	"author": "Sabin Puiu",
 	"homepage": "https://github.com/puiusabin/bun-smtp",
