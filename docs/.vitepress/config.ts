@@ -4,6 +4,7 @@ export default defineConfig({
 	base: "/bun-smtp/",
 	title: "bun-smtp",
 	description: "Fast SMTP/LMTP server library for Bun",
+	head: [["link", { rel: "icon", href: "/bun-smtp/favicon.ico" }]],
 	themeConfig: {
 		nav: [
 			{ text: "Guide", link: "/guide/getting-started" },
