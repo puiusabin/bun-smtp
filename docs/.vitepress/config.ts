@@ -1,6 +1,7 @@
 import { defineConfig } from "vitepress";
 
 export default defineConfig({
+	base: "/bun-smtp/",
 	title: "bun-smtp",
 	description: "Fast SMTP/LMTP server library for Bun",
 	themeConfig: {
