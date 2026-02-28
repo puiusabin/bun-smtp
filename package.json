@@ -43,10 +43,14 @@
 		"build": "bun build ./index.ts --outdir ./dist --format esm --target bun && bunx tsc -p tsconfig.build.json",
 		"prepublishOnly": "bun run build",
 		"test": "bun test",
-		"typecheck": "bunx tsc --noEmit"
+		"typecheck": "bunx tsc --noEmit",
+		"docs:dev": "vitepress dev docs",
+		"docs:build": "vitepress build docs",
+		"docs:preview": "vitepress preview docs"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.4.4",
-		"@types/bun": "latest"
+		"@types/bun": "latest",
+		"vitepress": "^1.6.4"
 	}
 }
