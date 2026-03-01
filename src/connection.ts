@@ -889,7 +889,10 @@ const HANDLERS: Record<string, Handler> = {
 			onData(chunk) {
 				controller.enqueue(new Uint8Array(chunk));
 				ctx.dataBytes += chunk.length;
-				if (ctx.server.options.size && ctx.dataBytes > ctx.server.options.size) {
+				if (
+					ctx.server.options.size &&
+					ctx.dataBytes > ctx.server.options.size
+				) {
 					stream.sizeExceeded = true;
 				}
 			},

@@ -235,7 +235,10 @@ export class SMTPServer implements ServerInstance {
 	 */
 	listen(port: number, callback?: () => void): this;
 	listen(port: number, host: string, callback?: () => void): this;
-	listen(options: { port?: number; host?: string; hostname?: string }, callback?: () => void): this;
+	listen(
+		options: { port?: number; host?: string; hostname?: string },
+		callback?: () => void,
+	): this;
 	listen(...args: unknown[]): this {
 		let port = 0;
 		let listenHost = "0.0.0.0";
