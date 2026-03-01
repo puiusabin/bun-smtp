@@ -19,6 +19,7 @@ export default defineConfig({
 				text: "Guide",
 				items: [
 					{ text: "Getting Started", link: "/guide/getting-started" },
+					{ text: "Migrating from smtp-server", link: "/guide/migrating-from-smtp-server" },
 					{ text: "Authentication", link: "/guide/authentication" },
 					{ text: "TLS & STARTTLS", link: "/guide/tls" },
 				],
