@@ -51,7 +51,7 @@ bun add bun-smtp
 
 ## Documentation
 
-Full docs coming soon.
+[puiusabin.github.io/bun-smtp](https://puiusabin.github.io/bun-smtp/)
 
 ## Contributing
 
