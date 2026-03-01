@@ -885,10 +885,13 @@ const HANDLERS: Record<string, Handler> = {
 		ctx.dataBytes = 0;
 
 		// Switch parser to data mode
-		ctx.parser.startDataMode(ctx.server.options.size ?? 0, {
+		ctx.parser.startDataMode(ctx.server.options.size ?? Infinity, {
 			onData(chunk) {
 				controller.enqueue(new Uint8Array(chunk));
 				ctx.dataBytes += chunk.length;
+				if (ctx.server.options.size && ctx.dataBytes > ctx.server.options.size) {
+					stream.sizeExceeded = true;
+				}
 			},
 			onDataEnd(byteLength, sizeExceeded) {
 				stream.byteLength = byteLength;
