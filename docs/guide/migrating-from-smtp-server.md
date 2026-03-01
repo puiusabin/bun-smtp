@@ -13,18 +13,14 @@ differs.
 
 ## Starting the server
 
-`server.listen()` now returns a `Promise`. The callback style still works, but
-you can also await it:
+`server.listen()` works the same way as in smtp-server — pass a callback:
 
 ```ts
 // smtp-server
 server.listen(2525, callback);
 
-// bun-smtp — callback still works
+// bun-smtp — identical
 server.listen(2525, callback);
-
-// or await
-await server.listen(2525);
 ```
 
 ## onData stream
@@ -70,8 +66,10 @@ onData(stream, session, callback) {
 }
 ```
 
-`stream.byteLength` and `stream.sizeExceeded` work the same — they are set
-after the stream closes.
+`stream.byteLength` is set after the stream closes. `stream.sizeExceeded`
+becomes `true` as soon as the running byte count exceeds `options.size` during
+iteration — you can check it inside a `for await` loop for early exit.
+`stream.byteLength` is only available after the loop completes.
 
 ## logger option
 
