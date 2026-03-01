@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/puiusabin/bun-smtp/compare/v0.2.0...v0.3.0) (2026-03-01)
+
+
+### Features
+
+* add typed overloads for listen() ([4b02ecc](https://github.com/puiusabin/bun-smtp/commit/4b02eccfc30c7be39fd05cd917e060175b1f2419))
+
+
+### Bug Fixes
+
+* use Infinity sentinel and set sizeExceeded progressively ([eb9bf7a](https://github.com/puiusabin/bun-smtp/commit/eb9bf7a59c29c98d7737923225e8389d185a0b9f))
+
 ## [0.2.0](https://github.com/puiusabin/bun-smtp/compare/v0.1.1...v0.2.0) (2026-02-27)
 
 
