@@ -64,14 +64,10 @@ bun add bun-smtp
 
 ## Benchmarks
 
-vs `smtp-server` on Node, same machine, same client:
-
 | Scenario                                    | bun-smtp     | smtp-server  | Advantage   |
 | ------------------------------------------- | ------------ | ------------ | ----------- |
 | Concurrent transactions (50 connections)    | 43,650 msg/s | 28,257 msg/s | **+54.5%**  |
 | Large payloads (10 connections, 1MB bodies) | 1,669 MB/s   | 573 MB/s     | **+191.1%** |
-
-Methodology and full results: [`bench/RESULTS.md`](bench/RESULTS.md). Run it yourself: `bun run bench`.
 
 ## Documentation
 
