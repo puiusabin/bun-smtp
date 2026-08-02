@@ -31,53 +31,58 @@ import type {
 	SMTPServerOptions,
 } from "./types.ts";
 
-// Default development TLS cert (self-signed localhost, from smtp-server/lib/tls-options.js)
+// Default development TLS cert (self-signed localhost, regenerated 2026-08-02 —
+// the original smtp-server/lib/tls-options.js fixture expired 2025-02-09, which
+// silently broke STARTTLS for anyone not supplying their own key/cert). Valid
+// until 2036-07-30.
 const DEFAULT_TLS_KEY =
 	"-----BEGIN RSA PRIVATE KEY-----\n" +
-	"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
+	"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\n" +
 	"-----END RSA PRIVATE KEY-----";
 
 const DEFAULT_TLS_CERT =
 	"-----BEGIN CERTIFICATE-----\n" +
-	"MIICpDCCAYwCCQCuVLVKVTXnAjANBgkqhkiG9w0BAQsFADAUMRIwEAYDVQQDEwls\n" +
-	"b2NhbGhvc3QwHhcNMTUwMjEyMTEzMjU4WhcNMjUwMjA5MTEzMjU4WjAUMRIwEAYD\n" +
-	"VQQDEwlsb2NhbGhvc3QwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDp\n" +
-	"nlCqHD6hZ+G0SIwcTfYe33ibBMGkB+O3e8+lfwzsMwJPAezXFxe9DiVDevCt4NM5\n" +
-	"Z2gl4QTLuAzFeofSPDRZ8HH7wgglTr3Gy07JPsVEUO8DXJNFdjbK30rmzpIqR6f9\n" +
-	"5sx+ZlH7Tc0PhQWwPOTPQV+ByOuReaswXkSHlRdf/71gd5TGWnSAwC379K6ZKaAJ\n" +
-	"rKzFkuMul3i5fP5f4lXGyTUAKDU2gQ7uVYkL/dYE/swhy7bBWwx3Zd6AtPSBZh9P\n" +
-	"X+OwgfrhT+ZL9JVcL1CHEyX1h+SjaTHU6JiEPGEezvlElmGs1HGB+LCBJvnQbDg0\n" +
-	"BBoMjGv8Mk90uGCeljpRAgMBAAEwDQYJKoZIhvcNAQELBQADggEBABXm8GPdY0sc\n" +
-	"mMUFlgDqFzcevjdGDce0QfboR+M7WDdm512Jz2SbRTgZD/4na42ThODOZz9z1AcM\n" +
-	"zLgx2ZNZzVhBz0odCU4JVhOCEks/OzSyKeGwjIb4JAY7dh+Kju1+6MNfQJ4r1Hza\n" +
-	"SVXH0+JlpJDaJ73NQ2JyfqELmJ1mTcptkA/N6rQWhlzycTBSlfogwf9xawgVPATP\n" +
-	"4AuwgjHl12JI2HVVs1gu65Y3slvaHRCr0B4+Kg1GYNLLcbFcK+NEHrHmPxy9TnTh\n" +
-	"Zwp1dsNQU+Xkylz8IUANWSLHYZOMtN2e5SKIdwTtl5C8YxveuY8YKb1gDExnMraT\n" +
-	"VGXQDqPleug=\n" +
+	"MIIDCTCCAfGgAwIBAgIUS4QGr1H/dLasDI0BGghF+CLqVa0wDQYJKoZIhvcNAQEL\n" +
+	"BQAwFDESMBAGA1UEAwwJbG9jYWxob3N0MB4XDTI2MDgwMjExMjA1NFoXDTM2MDcz\n" +
+	"MDExMjA1NFowFDESMBAGA1UEAwwJbG9jYWxob3N0MIIBIjANBgkqhkiG9w0BAQEF\n" +
+	"AAOCAQ8AMIIBCgKCAQEAnyNsc7fNikJSmvucttzKZ8Fmuz/V4Daso6oQFKz3Azov\n" +
+	"d0ob/wCkUqt6PG2YcEZXlObgDFHxwszjKqWpelABg9QUNehXNC8xe9Ca5L7OsBeR\n" +
+	"1Cs+NZ0ILv9TQHXKFCqMm8DjSrBOqq+FftFjh9UyX59jJBycCq9I5gNOA8AJhLlJ\n" +
+	"amRDnHlRl1R4YXAEpVWyqA70NcOoKu5tIAJJbn+lFvTP78Wz5RkXDQA2TPD1pmQj\n" +
+	"8h8T9tDeV6AmVfh3VRf4nNBexdFP884JaIIfnsYQQBf7PPg2BK5yB6PgUfog8viE\n" +
+	"kbEtxOywt2xJhnHacdXiPVKP6DP2Ad7nPXhP1fXGcQIDAQABo1MwUTAdBgNVHQ4E\n" +
+	"FgQUYr5Jg06e8MNG+wOPeIuhRlhCtycwHwYDVR0jBBgwFoAUYr5Jg06e8MNG+wOP\n" +
+	"eIuhRlhCtycwDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOCAQEAHivq\n" +
+	"7LrbkE3jZT3dH9/whv0qN3O9Shpaw3wyrIax5SmJTDieFf/Uvv8T5eVjfnMnDXzg\n" +
+	"VwxkVcRzjDNxLgizokGS7pKOI2zmYZzuxzCUUrqrOUAXkVQTZT/jGd55ILSqftGX\n" +
+	"pvuUA7lIbpo2cEIruYXWdv1AowcmaIBKhrbGX5MAwSkdh5E6oBHspw6a3OkfbXfk\n" +
+	"FpOsaWV77A1XKY7v8NuRPA6i7ZuSVbgZjuwNs+6rd1QuSpvIZU6dDsxxDGqaBFfY\n" +
+	"slg0UjtwfIUB2T4jLxy5Qv1VKs+hIgUNhexKMpide7gDy0FreYIfn8AoGwmvgOJk\n" +
+	"D/wiTbnQMCuob2DTmg==\n" +
 	"-----END CERTIFICATE-----";
 
 // ---- Default no-op handlers ------------------------------------------------
@@ -258,10 +263,9 @@ export class SMTPServer implements ServerInstance {
 
 		const server = this;
 
-		const tls =
-			this.options.secure || this.options.needsUpgrade
-				? { key: this.tlsKey, cert: this.tlsCert }
-				: undefined;
+		const tls = this.options.secure
+			? { key: this.tlsKey, cert: this.tlsCert }
+			: undefined;
 
 		this._listener = Bun.listen<ConnectionContext>({
 			hostname: listenHost,
@@ -290,13 +294,15 @@ export class SMTPServer implements ServerInstance {
 
 				data(socket, chunk) {
 					const ctx = socket.data;
-					const buf = Buffer.from(chunk);
+					// Ignore raw encrypted bytes once TLS upgrade is in progress or done.
+					// The TLS socket handler (in the STARTTLS command) handles decrypted data.
+					if (ctx.upgrading || ctx.tlsUpgraded) return;
 					// Data-mode chunks bypass the command queue to avoid deadlocking the
 					// drain loop (which is suspended while awaiting the onData callback).
 					if (ctx.parser.dataMode) {
-						ctx.parser.feedDataMode(buf);
+						ctx.parser.feedDataMode(chunk);
 					} else {
-						enqueueChunk(ctx, buf);
+						enqueueChunk(ctx, chunk);
 					}
 				},
 
