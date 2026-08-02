@@ -160,6 +160,7 @@ export function createContext(
 		ready: false,
 		secure: !!server.options.secure,
 		upgrading: false,
+		tlsUpgraded: false,
 		closing: false,
 		closed: false,
 		canEmitConnection: true,
@@ -183,7 +184,6 @@ export function createContext(
 		xForward: session.xForward,
 		tlsOptions: false,
 		timeoutHandle: null,
-		lastActivity: 0,
 		dataController: null,
 		dataStream: null,
 		dataBytes: 0,
@@ -255,20 +255,20 @@ async function connectionReady(ctx: ConnectionContext): Promise<void> {
 // ---- Chunk processing queue -------------------------------------------------
 
 export function enqueueChunk(ctx: ConnectionContext, raw: Buffer): void {
-	ctx.pendingChunks.push(raw); // caller already owns this buffer (copied at socket.data)
-	if (!ctx.processing) {
+	ctx.pendingChunks.push(raw); // Bun delivers a fresh Buffer per data event — caller owns it
+	if (!ctx.processing && !ctx.upgrading) {
 		ctx.processing = true;
 		void drainChunks(ctx);
 	}
 }
 
 async function drainChunks(ctx: ConnectionContext): Promise<void> {
-	let i = 0;
-	while (i < ctx.pendingChunks.length) {
-		await processChunk(ctx, ctx.pendingChunks[i] as Buffer);
-		i++;
+	while (ctx.pendingChunks.length > 0) {
+		if (ctx.upgrading) break;
+		const chunk = ctx.pendingChunks.shift();
+		if (!chunk) break;
+		await processChunk(ctx, chunk);
 	}
-	ctx.pendingChunks.length = 0;
 	ctx.processing = false;
 }
 
@@ -500,8 +500,8 @@ const HANDLERS: Record<string, Handler> = {
 
 		if (
 			!ctx.secure &&
-			isSupported(ctx, "STARTTLS") &&
-			!ctx.server.options.hideSTARTTLS
+			!ctx.server.options.hideSTARTTLS &&
+			isSupported(ctx, "STARTTLS")
 		) {
 			features.push("STARTTLS");
 		}
@@ -589,54 +589,89 @@ const HANDLERS: Record<string, Handler> = {
 			return;
 		}
 
-		sendRaw(ctx, buildResponse(ctx, 220, "Ready to start TLS"));
+		// Send 220 on the plain socket before upgrade begins.
+		sendRaw(ctx, buildResponse(ctx, 220, "Ready to start TLS", false));
+
 		ctx.upgrading = true;
 
-		// upgradeTLS returns [raw, tls] and requires socket handlers for the new TLS socket.
-		// The open() callback fires when the TLS handshake completes.
-		ctx.socket.upgradeTLS<ConnectionContext>({
-			data: ctx,
-			tls: {
-				key: ctx.server.tlsKey,
-				cert: ctx.server.tlsCert,
-			},
-			socket: {
-				open(tlsSocket) {
-					ctx.socket = tlsSocket;
-					ctx.secure = true;
-					ctx.session.secure = true;
-					ctx.upgrading = false;
+		// Server-side upgradeTLS requires isServer:true (oven-sh/bun#25044, fixed by
+		// oven-sh/bun#32630). That fix isn't in every Bun release yet, so upgradeTLS
+		// still throws synchronously on older runtimes — catch it so the error doesn't
+		// propagate as an unhandled rejection and the connection closes cleanly instead.
+		try {
+			ctx.socket.upgradeTLS<ConnectionContext>({
+				isServer: true,
+				data: ctx,
+				tls: { key: ctx.server.tlsKey, cert: ctx.server.tlsCert },
+				socket: {
+					data(socket, chunk) {
+						const c = socket.data;
+						if (c.parser.dataMode) {
+							c.parser.feedDataMode(chunk);
+						} else {
+							enqueueChunk(c, chunk);
+						}
+					},
+					drain(_socket) {},
+					close(socket) {
+						handleClose(socket.data);
+					},
+					error(socket, err) {
+						handleError(socket.data, err as SMTPError);
+					},
+					handshake(socket, success, _authorizationError) {
+						const c = socket.data;
+						// Silence the original plain-socket handler from this point on.
+						c.tlsUpgraded = true;
 
-					ctx.server.onSecure(tlsSocket, ctx.session, (err) => {
-						if (err) {
-							handleError(ctx, err as SMTPError);
+						if (!success) {
+							c.upgrading = false;
+							closeSocket(c);
 							return;
 						}
-						// RFC: server MUST reset all state after STARTTLS
-						ctx.hostNameAppearsAs = "";
-						ctx.session.hostNameAppearsAs = "";
-						ctx.openingCommand = "";
-						ctx.session.openingCommand = "";
-						resetSession(ctx);
-					});
+
+						c.socket = socket as Socket<ConnectionContext>;
+						c.secure = true;
+						c.session.secure = true;
+						c.tlsOptions = { name: "TLS" };
+						c.session.tlsOptions = c.tlsOptions;
+						// Client must re-authenticate after STARTTLS.
+						c.session.user = undefined;
+						c.unauthCmds = 0;
+
+						new Promise<void>((resolve, reject) => {
+							c.server.onSecure(socket, c.session, (err) => {
+								if (err) reject(err);
+								else resolve();
+							});
+						})
+							.then(() => {
+								c.upgrading = false;
+								if (!c.processing && c.pendingChunks.length > 0) {
+									c.processing = true;
+									void drainChunks(c);
+								}
+							})
+							.catch((err: SMTPError) => {
+								c.upgrading = false;
+								handleError(c, err);
+							});
+					},
 				},
-				data(tlsSocket, chunk) {
-					const ctx = tlsSocket.data;
-					const buf = Buffer.from(chunk);
-					if (ctx.parser.dataMode) {
-						ctx.parser.feedDataMode(buf);
-					} else {
-						enqueueChunk(ctx, buf);
-					}
-				},
-				close(tlsSocket) {
-					handleClose(tlsSocket.data);
-				},
-				error(tlsSocket, err) {
-					handleError(tlsSocket.data, err as SMTPError);
-				},
-			},
-		});
+			});
+		} catch (err) {
+			ctx.upgrading = false;
+			ctx.server.emit(
+				"error",
+				Object.assign(
+					new Error(
+						`STARTTLS unsupported on this Bun runtime: ${err instanceof Error ? err.message : String(err)}`,
+					),
+					{ code: "ERR_TLS_UPGRADE_UNSUPPORTED" },
+				),
+			);
+			closeSocket(ctx);
+		}
 	},
 
 	async AUTH(ctx, line) {
@@ -936,6 +971,14 @@ const HANDLERS: Record<string, Handler> = {
 							),
 						);
 					}
+				} else if (stream.sizeExceeded) {
+					if (ctx.server.options.lmtp) {
+						for (let i = 0; i < rcptCount; i++) {
+							sendRaw(ctx, buildResponse(ctx, 552, "5.3.4 Message too large"));
+						}
+					} else {
+						sendRaw(ctx, buildResponse(ctx, 552, "5.3.4 Message too large"));
+					}
 				} else if (Array.isArray(message)) {
 					for (const resp of message) {
 						if (
@@ -1118,34 +1161,42 @@ const HANDLERS: Record<string, Handler> = {
 			ctx.xClient.set(k, v);
 		}
 
+		// XCLIENT represents a new logical connection — reset auth and envelope.
+		ctx.session.user = undefined;
+		resetSession(ctx);
+
+		const greetingMsg = `${ctx.name} ${ctx.server.options.lmtp ? "LMTP" : "ESMTP"}${ctx.server.options.banner ? ` ${ctx.server.options.banner}` : ""}`;
+
 		if (loginValue !== false) {
-			// Authenticate the proxied user via XCLIENT
+			// Authenticate the proxied user via XCLIENT LOGIN.
+			// The 220 response is sent inside the callback to avoid a race where
+			// the greeting fires before the async auth result is known.
 			ctx.server.onAuth(
 				{ method: "XCLIENT", username: loginValue, password: null },
 				ctx.session,
 				(err, response) => {
 					if (err || !response?.user) {
-						// proceed without auth
-					} else {
-						ctx.session.user = response.user;
-						ctx.session.transmissionType = computeTransmissionType(ctx);
+						sendRaw(ctx, buildResponse(ctx, 535, "Authentication failed"));
+						return;
 					}
+					ctx.session.user = response.user;
+					ctx.session.transmissionType = computeTransmissionType(ctx);
+					if (
+						!ctx.server.options.useXForward &&
+						!ctx.server.options.useXClient
+					) {
+						emitConnection(ctx);
+					}
+					sendRaw(ctx, buildResponse(ctx, 220, greetingMsg));
 				},
 			);
+			return;
 		}
 
 		if (!ctx.server.options.useXForward && !ctx.server.options.useXClient) {
 			emitConnection(ctx);
 		}
-
-		sendRaw(
-			ctx,
-			buildResponse(
-				ctx,
-				220,
-				`${ctx.name} ${ctx.server.options.lmtp ? "LMTP" : "ESMTP"}${ctx.server.options.banner ? ` ${ctx.server.options.banner}` : ""}`,
-			),
-		);
+		sendRaw(ctx, buildResponse(ctx, 220, greetingMsg));
 	},
 
 	XFORWARD(ctx, line) {
@@ -1384,25 +1435,17 @@ export function handleError(ctx: ConnectionContext, err: SMTPError): void {
 // ---- Timeout ---------------------------------------------------------------
 
 function resetTimeout(ctx: ConnectionContext): void {
-	ctx.lastActivity = Date.now();
-	if (!ctx.timeoutHandle) {
-		ctx.timeoutHandle = setTimeout(
-			() => tickTimeout(ctx),
-			ctx.server.options.socketTimeout ?? SOCKET_TIMEOUT,
-		);
-	}
+	clearTimeout(ctx.timeoutHandle ?? undefined);
+	ctx.timeoutHandle = setTimeout(
+		() => tickTimeout(ctx),
+		ctx.server.options.socketTimeout ?? SOCKET_TIMEOUT,
+	);
 }
 
 function tickTimeout(ctx: ConnectionContext): void {
 	ctx.timeoutHandle = null;
 	if (ctx.closed || ctx.closing) return;
-	const socketTimeout = ctx.server.options.socketTimeout ?? SOCKET_TIMEOUT;
-	const remaining = socketTimeout - (Date.now() - ctx.lastActivity);
-	if (remaining <= 0) {
-		sendRaw(ctx, buildResponse(ctx, 421, "Timeout - closing connection"));
-	} else {
-		ctx.timeoutHandle = setTimeout(() => tickTimeout(ctx), remaining);
-	}
+	sendRaw(ctx, buildResponse(ctx, 421, "Timeout - closing connection"));
 }
 
 // ---- Reverse DNS -----------------------------------------------------------

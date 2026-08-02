@@ -1,5 +1,14 @@
 import type { Socket } from "bun";
 
+// @types/bun (as of 1.3.14) doesn't yet expose the `isServer` option added by
+// oven-sh/bun#32630 for server-side socket.upgradeTLS() (oven-sh/bun#25044).
+// Remove this augmentation once @types/bun ships it upstream.
+declare module "bun" {
+	interface TLSUpgradeOptions<Data> {
+		isServer?: boolean;
+	}
+}
+
 // ---- TLS ----------------------------------------------------------------
 
 export interface TLSOptions {
@@ -275,6 +284,7 @@ export interface ConnectionContext {
 	ready: boolean;
 	secure: boolean;
 	upgrading: boolean;
+	tlsUpgraded: boolean;
 	closing: boolean;
 	closed: boolean;
 	canEmitConnection: boolean;
@@ -303,7 +313,6 @@ export interface ConnectionContext {
 
 	// Timeout
 	timeoutHandle: ReturnType<typeof setTimeout> | null;
-	lastActivity: number;
 
 	// DATA mode
 	dataController: ReadableStreamDefaultController<Uint8Array> | null;
