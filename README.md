@@ -26,6 +26,9 @@
 
 A fast SMTP/LMTP server library built natively on Bun.
 
+**Up to 3x faster than `smtp-server`** on large message throughput, and 54%
+faster on concurrent mail transactions — see [Benchmarks](#benchmarks).
+
 ```ts
 import { SMTPServer } from "bun-smtp";
 
@@ -60,6 +63,20 @@ bun add bun-smtp
 - **SASL auth** 🔐 - PLAIN, LOGIN, CRAM-MD5, and XOAUTH2 out of the box.
 
 - **TypeScript first** 🟦 - Fully typed API with strong types throughout.
+
+## Benchmarks
+
+Measured with [`bench/run.ts`](bench/run.ts): bun-smtp and `smtp-server` run as
+separate OS processes (Bun vs Node) with identical options, driven by the same
+raw-TCP client, median of 3 timed runs per scenario. Full methodology and
+machine details in [`bench/RESULTS.md`](bench/RESULTS.md).
+
+| Scenario | bun-smtp (Bun) | smtp-server (Node) | bun-smtp advantage |
+| --- | --- | --- | --- |
+| Concurrent transaction throughput (50 connections, MAIL/RCPT/DATA) | 43,650 msg/s | 28,257 msg/s | **+54.5%** |
+| Large payload throughput (10 connections, 1MB bodies) | 1,669 MB/s | 573 MB/s | **+191.1%** |
+
+Run it yourself: `bun run bench`.
 
 ## Documentation
 
