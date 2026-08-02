@@ -23,7 +23,7 @@ features:
   - icon: 🔄
     title: Drop-in replacement
     details: Same constructor options, callbacks, and event names as the smtp-server npm package. Minimal migration effort.
-  - icon: 😃
-    title: TypeScript-first
-    details: Fully typed API with strong types throughout. Callbacks, sessions, and envelopes are all strongly typed.
+  - icon: ✨
+    title: Delightful DX
+    details: Fully typed API, sensible defaults, and minimal boilerplate.
 ---

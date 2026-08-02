@@ -57,9 +57,8 @@ bun add bun-smtp
 - **Ultrafast** ⚡ - Up to 3x faster than `smtp-server` on large payloads, 54% faster on concurrent transactions. See [Benchmarks](#benchmarks).
 - **Bun-native** 🚀 - Uses `Bun.listen()` and `Bun.CryptoHasher`. No Node.js compat layer. STARTTLS works via `socket.upgradeTLS()` on Bun canary ([oven-sh/bun#25044](https://github.com/oven-sh/bun/issues/25044) is closed upstream; not yet in a stable release).
 - **Drop-in replacement** 🔄 - Same constructor options, callbacks, and event names as `smtp-server`. Minimal migration effort.
-- **SASL auth** 🔐 - PLAIN, LOGIN, CRAM-MD5, and XOAUTH2 out of the box.
 
-- **TypeScript first** 🟦 - Fully typed API with strong types throughout.
+- **Delightful DX** ✨ - Fully typed API, sensible defaults, and minimal boilerplate.
 
 ## Benchmarks
 
