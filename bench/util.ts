@@ -6,7 +6,10 @@ export function withTimeout<T>(
 ): Promise<T> {
 	let timer: Timer;
 	const timeout = new Promise<never>((_, reject) => {
-		timer = setTimeout(() => reject(new Error(`timed out after ${ms}ms: ${label}`)), ms);
+		timer = setTimeout(
+			() => reject(new Error(`timed out after ${ms}ms: ${label}`)),
+			ms,
+		);
 	});
 	return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }

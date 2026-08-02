@@ -18,11 +18,18 @@ function makeBody(sizeBytes: number): string {
 	return Array.from({ length: linesNeeded }, () => line).join("\r\n");
 }
 
-async function connectAndGreet(port: number, label: string): Promise<SMTPClient> {
+async function connectAndGreet(
+	port: number,
+	label: string,
+): Promise<SMTPClient> {
 	const client = new SMTPClient();
 	await withTimeout(client.connect(port), OP_TIMEOUT_MS, `${label}: connect`);
 	await client.send("EHLO bench.local");
-	await withTimeout(client.readResponse(), OP_TIMEOUT_MS, `${label}: EHLO response`);
+	await withTimeout(
+		client.readResponse(),
+		OP_TIMEOUT_MS,
+		`${label}: EHLO response`,
+	);
 	return client;
 }
 
@@ -37,9 +44,17 @@ export async function connectionThroughput(
 		const client = new SMTPClient();
 		await withTimeout(client.connect(port), OP_TIMEOUT_MS, `${label}: connect`); // consumes the 220 greeting
 		await client.send("EHLO bench.local");
-		await withTimeout(client.readResponse(), OP_TIMEOUT_MS, `${label}: EHLO response`);
+		await withTimeout(
+			client.readResponse(),
+			OP_TIMEOUT_MS,
+			`${label}: EHLO response`,
+		);
 		await client.send("QUIT");
-		await withTimeout(client.readResponse(), OP_TIMEOUT_MS, `${label}: QUIT response`);
+		await withTimeout(
+			client.readResponse(),
+			OP_TIMEOUT_MS,
+			`${label}: QUIT response`,
+		);
 		client.close();
 		if ((i + 1) % 200 === 0) {
 			console.log(`  connectionThroughput: ${i + 1}/${count}`);
@@ -71,7 +86,9 @@ export async function concurrentTransactionThroughput(
 			connectAndGreet(port, `concurrentTransactionThroughput setup #${i}`),
 		),
 	);
-	console.log(`  concurrentTransactionThroughput: ${concurrency} connections ready`);
+	console.log(
+		`  concurrentTransactionThroughput: ${concurrency} connections ready`,
+	);
 
 	const start = performance.now();
 	const deadline = start + durationMs;
@@ -82,13 +99,29 @@ export async function concurrentTransactionThroughput(
 			while (performance.now() < deadline) {
 				const label = `concurrentTransactionThroughput worker #${workerIdx}`;
 				await client.send("MAIL FROM:<bench@example.com>");
-				await withTimeout(client.readResponse(), OP_TIMEOUT_MS, `${label}: MAIL response`);
+				await withTimeout(
+					client.readResponse(),
+					OP_TIMEOUT_MS,
+					`${label}: MAIL response`,
+				);
 				await client.send("RCPT TO:<rcpt@example.com>");
-				await withTimeout(client.readResponse(), OP_TIMEOUT_MS, `${label}: RCPT response`);
+				await withTimeout(
+					client.readResponse(),
+					OP_TIMEOUT_MS,
+					`${label}: RCPT response`,
+				);
 				await client.send("DATA");
-				await withTimeout(client.readResponse(), OP_TIMEOUT_MS, `${label}: DATA response`);
+				await withTimeout(
+					client.readResponse(),
+					OP_TIMEOUT_MS,
+					`${label}: DATA response`,
+				);
 				await client.sendRaw(`${body}\r\n.\r\n`);
-				await withTimeout(client.readResponse(), OP_TIMEOUT_MS, `${label}: post-DATA response`);
+				await withTimeout(
+					client.readResponse(),
+					OP_TIMEOUT_MS,
+					`${label}: post-DATA response`,
+				);
 				totalMessages++;
 			}
 			client.close();
@@ -133,13 +166,29 @@ export async function largePayloadThroughput(
 			while (performance.now() < deadline) {
 				const label = `largePayloadThroughput worker #${workerIdx}`;
 				await client.send("MAIL FROM:<bench@example.com>");
-				await withTimeout(client.readResponse(), opTimeoutMs, `${label}: MAIL response`);
+				await withTimeout(
+					client.readResponse(),
+					opTimeoutMs,
+					`${label}: MAIL response`,
+				);
 				await client.send("RCPT TO:<rcpt@example.com>");
-				await withTimeout(client.readResponse(), opTimeoutMs, `${label}: RCPT response`);
+				await withTimeout(
+					client.readResponse(),
+					opTimeoutMs,
+					`${label}: RCPT response`,
+				);
 				await client.send("DATA");
-				await withTimeout(client.readResponse(), opTimeoutMs, `${label}: DATA response`);
+				await withTimeout(
+					client.readResponse(),
+					opTimeoutMs,
+					`${label}: DATA response`,
+				);
 				await client.sendRaw(`${body}\r\n.\r\n`);
-				await withTimeout(client.readResponse(), opTimeoutMs, `${label}: post-DATA response`);
+				await withTimeout(
+					client.readResponse(),
+					opTimeoutMs,
+					`${label}: post-DATA response`,
+				);
 				totalBytes += body.length;
 			}
 			client.close();

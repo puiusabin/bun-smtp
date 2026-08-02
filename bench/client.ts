@@ -38,7 +38,9 @@ export class SMTPClient {
 
 						let newlineIdx = client.buffer.indexOf("\n");
 						while (newlineIdx !== -1) {
-							const line = client.buffer.slice(0, newlineIdx).replace(/\r$/, "");
+							const line = client.buffer
+								.slice(0, newlineIdx)
+								.replace(/\r$/, "");
 							client.buffer = client.buffer.slice(newlineIdx + 1);
 							newlineIdx = client.buffer.indexOf("\n");
 							if (client.resolve) {

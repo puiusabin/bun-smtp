@@ -146,7 +146,9 @@ async function main() {
 			"that only drains the stream. Same client driver (`bench/client.ts`) used against both.",
 	);
 	lines.push("");
-	lines.push(`| Scenario | ${BUN_TARGET.name} | ${NODE_TARGET.name} | bun-smtp advantage |`);
+	lines.push(
+		`| Scenario | ${BUN_TARGET.name} | ${NODE_TARGET.name} | bun-smtp advantage |`,
+	);
 	lines.push("| --- | --- | --- | --- |");
 
 	for (const [scenarioName, bunResult] of bunResults) {
@@ -156,7 +158,8 @@ async function main() {
 			((bunResult.metricValue - nodeResult.metricValue) /
 				nodeResult.metricValue) *
 			100;
-		const advantage = pctDiff >= 0 ? `+${pctDiff.toFixed(1)}%` : `${pctDiff.toFixed(1)}%`;
+		const advantage =
+			pctDiff >= 0 ? `+${pctDiff.toFixed(1)}%` : `${pctDiff.toFixed(1)}%`;
 		const marker = scenarioName === "Connection throughput" ? "\\*" : "";
 		lines.push(
 			`| ${scenarioName}${marker} | ${formatMetric(bunResult)} | ${formatMetric(nodeResult)} | ${advantage} |`,
@@ -165,7 +168,7 @@ async function main() {
 
 	lines.push("");
 	lines.push(
-		'\\* Both bun-smtp and smtp-server deliberately delay the 220 greeting by 100ms ' +
+		"\\* Both bun-smtp and smtp-server deliberately delay the 220 greeting by 100ms " +
 			'before accepting any commands, an anti-spam "early talker" guard present in ' +
 			"both implementations (see `smtp-server`'s `smtp-connection.js`, `readyTimer`). " +
 			"That fixed per-connection delay dominates this scenario, so it mostly measures " +
