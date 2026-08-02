@@ -10,10 +10,11 @@ jobs:
   test:
     name: Test (Bun ${{ matrix.bun-version }})
     runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.bun-version == 'canary' }}
     strategy:
       fail-fast: false
       matrix:
-        bun-version: ["latest", "1.2"]
+        bun-version: ["latest", "1.2", "canary"]
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
