@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/puiusabin/bun-smtp/compare/v0.3.1...v0.4.0) (2026-08-02)
+
+
+### Features
+
+* **bench:** add benchmark suite comparing bun-smtp vs smtp-server ([3c14faa](https://github.com/puiusabin/bun-smtp/commit/3c14faa82c92140b1cfdf06f0ccd37527f9290e4))
+
 ## [0.3.1](https://github.com/puiusabin/bun-smtp/compare/v0.3.0...v0.3.1) (2026-08-02)
 
 
