@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.1](https://github.com/puiusabin/bun-smtp/compare/v0.3.0...v0.3.1) (2026-08-02)
+
+
+### Bug Fixes
+
+* **auth:** use crypto.getRandomValues for CRAM-MD5 challenge nonce ([0235ebc](https://github.com/puiusabin/bun-smtp/commit/0235ebc79819bf94a7e2558561e733b351574766))
+* **connection:** enable server-side STARTTLS via Bun's isServer upgrade option ([54149dd](https://github.com/puiusabin/bun-smtp/commit/54149dd9445bb522769516bf7fa8533ae8e4b4d5))
+* **smtp-server:** replace expired default self-signed TLS cert ([8f3986a](https://github.com/puiusabin/bun-smtp/commit/8f3986aafcad0104819abc610ace3d27093329b7))
+
 ## [0.3.0](https://github.com/puiusabin/bun-smtp/compare/v0.2.0...v0.3.0) (2026-03-01)
 
 
