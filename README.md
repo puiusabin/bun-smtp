@@ -24,9 +24,7 @@
 > TLS (port 465) or terminate TLS externally with HAProxy or stunnel; to use STARTTLS
 > today, install Bun canary (`bun upgrade --canary`).
 
-A fast SMTP/LMTP server library built natively on Bun.
-
-**Up to 3x faster than `smtp-server`** — see [Benchmarks](#benchmarks).
+An ultrafast SMTP/LMTP server library built natively on Bun.
 
 ```ts
 import { SMTPServer } from "bun-smtp";
@@ -68,10 +66,10 @@ bun add bun-smtp
 
 vs `smtp-server` on Node, same machine, same client:
 
-| Scenario | bun-smtp | smtp-server | Advantage |
-| --- | --- | --- | --- |
-| Concurrent transactions (50 connections) | 43,650 msg/s | 28,257 msg/s | **+54.5%** |
-| Large payloads (10 connections, 1MB bodies) | 1,669 MB/s | 573 MB/s | **+191.1%** |
+| Scenario                                    | bun-smtp     | smtp-server  | Advantage   |
+| ------------------------------------------- | ------------ | ------------ | ----------- |
+| Concurrent transactions (50 connections)    | 43,650 msg/s | 28,257 msg/s | **+54.5%**  |
+| Large payloads (10 connections, 1MB bodies) | 1,669 MB/s   | 573 MB/s     | **+191.1%** |
 
 Methodology and full results: [`bench/RESULTS.md`](bench/RESULTS.md). Run it yourself: `bun run bench`.
 
