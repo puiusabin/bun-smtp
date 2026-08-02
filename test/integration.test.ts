@@ -9,6 +9,21 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { SMTPServer } from "../src/smtp-server.ts";
 import type { SMTPServerOptions } from "../src/types.ts";
 
+// x509 verify error codes (Node/OpenSSL) that mean "peer's cert isn't trusted" —
+// expected and safe to ignore wherever we pass rejectUnauthorized: false against
+// the bundled self-signed dev cert, as opposed to a real transport failure.
+const CERT_TRUST_ERROR_CODES = new Set([
+	"UNABLE_TO_GET_ISSUER_CERT",
+	"UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+	"UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+	"CERT_HAS_EXPIRED",
+	"CERT_NOT_YET_VALID",
+	"DEPTH_ZERO_SELF_SIGNED_CERT",
+	"SELF_SIGNED_CERT_IN_CHAIN",
+	"CERT_UNTRUSTED",
+	"CERT_REJECTED",
+]);
+
 // ---- TCP test client -------------------------------------------------------
 
 class SMTPClient {
@@ -16,6 +31,9 @@ class SMTPClient {
 	private buffer = "";
 	private resolve: ((line: string) => void) | null = null;
 	private lines: string[] = [];
+	// Set to true before calling upgradeTLS() so the original plain handler
+	// ignores raw encrypted bytes (Bun does not unregister the original handlers).
+	private tlsUpgraded = false;
 
 	async connect(port: number): Promise<string> {
 		return new Promise((outerResolve) => {
@@ -30,6 +48,7 @@ class SMTPClient {
 						>;
 					},
 					data(_socket, rawData) {
+						if (client.tlsUpgraded) return;
 						const chunk = Buffer.from(rawData).toString("utf8");
 						client.buffer += chunk;
 
@@ -99,6 +118,82 @@ class SMTPClient {
 		(this.socket as unknown as { write(data: string): void }).write(data);
 	}
 
+	/**
+	 * Upgrade the existing plain TCP connection to TLS (STARTTLS client side).
+	 * Must be called after the server has responded with "220 Ready to start TLS".
+	 */
+	upgradeTLS(): Promise<void> {
+		return new Promise<void>((resolve, reject) => {
+			// Set the flag BEFORE calling upgradeTLS so the original plain handler
+			// ignores the raw encrypted TLS handshake bytes immediately.
+			this.tlsUpgraded = true;
+			const client = this;
+			const raw = this.socket as unknown as {
+				upgradeTLS(opts: {
+					data?: unknown;
+					tls: unknown;
+					socket: {
+						data(socket: unknown, data: Uint8Array): void;
+						drain(socket: unknown): void;
+						close(socket: unknown): void;
+						error(socket: unknown, err: unknown): void;
+						handshake(socket: unknown, success: boolean, error: unknown): void;
+					};
+				}): void;
+			};
+			raw.upgradeTLS({
+				tls: { rejectUnauthorized: false },
+				socket: {
+					data(_socket, rawData) {
+						const chunk = Buffer.from(rawData).toString("utf8");
+						client.buffer += chunk;
+						let newlineIdx = client.buffer.indexOf("\n");
+						while (newlineIdx !== -1) {
+							const line = client.buffer
+								.slice(0, newlineIdx)
+								.replace(/\r$/, "");
+							client.buffer = client.buffer.slice(newlineIdx + 1);
+							newlineIdx = client.buffer.indexOf("\n");
+							if (client.resolve) {
+								const res = client.resolve;
+								client.resolve = null;
+								res(line);
+							} else {
+								client.lines.push(line);
+							}
+						}
+					},
+					drain() {},
+					close() {},
+					error(_socket, err) {
+						reject(err instanceof Error ? err : new Error(String(err)));
+					},
+					handshake(socket, success, error) {
+						// `success: false` can mean either "peer's cert isn't trusted"
+						// (expected here — rejectUnauthorized: false above is specifically
+						// because the bundled dev cert is self-signed) or "the handshake
+						// never actually completed" (e.g. ECONNRESET when the server
+						// dropped the connection). Only the former is safe to ignore.
+						const code = (error as { code?: string } | null | undefined)?.code;
+						if (!success && !(code && CERT_TRUST_ERROR_CODES.has(code))) {
+							reject(
+								error instanceof Error
+									? error
+									: new Error(`TLS handshake failed: ${code ?? String(error)}`),
+							);
+							return;
+						}
+						// Update socket ref so send() writes through the TLS layer.
+						client.socket = socket as unknown as Awaited<
+							ReturnType<typeof Bun.connect>
+						>;
+						resolve();
+					},
+				},
+			});
+		});
+	}
+
 	close(): void {
 		try {
 			(this.socket as unknown as { end(): void }).end();
@@ -123,6 +218,41 @@ function makeServer(opts: SMTPServerOptions = {}): {
 	server.listen(port, "127.0.0.1");
 	return { server, port };
 }
+
+// ---- STARTTLS capability probe ---------------------------------------------
+
+/**
+ * oven-sh/bun#25044: server-side socket.upgradeTLS() only works on Bun builds
+ * containing oven-sh/bun#32630 (canary only as of Bun 1.3.14, latest stable).
+ * Probe once so the STARTTLS-upgrade tests self-enable the moment the running
+ * Bun supports it, without hardcoding a version number.
+ */
+async function detectStartTLSSupport(): Promise<boolean> {
+	const { server, port } = makeServer();
+	const client = new SMTPClient();
+	try {
+		await client.connect(port);
+		client.send("EHLO localhost");
+		await client.readResponse();
+		client.send("STARTTLS");
+		const resp = await client.readResponse();
+		if (!resp.startsWith("220")) return false;
+		await Promise.race([
+			client.upgradeTLS(),
+			new Promise<never>((_, reject) =>
+				setTimeout(() => reject(new Error("STARTTLS probe timed out")), 2000),
+			),
+		]);
+		return true;
+	} catch {
+		return false;
+	} finally {
+		client.close();
+		await new Promise<void>((r) => server.close(r));
+	}
+}
+
+const STARTTLS_UPGRADE_SUPPORTED = await detectStartTLSSupport();
 
 // ---- Helpers ---------------------------------------------------------------
 
@@ -935,4 +1065,154 @@ describe("pipelining (multiple commands in one send)", () => {
 		client.close();
 		await new Promise<void>((r) => server.close(r));
 	});
+});
+
+describe("STARTTLS", () => {
+	test("EHLO advertises STARTTLS on a plain server", async () => {
+		const { server, port } = makeServer({
+			authOptional: true,
+			disableReverseLookup: true,
+		});
+
+		const client = new SMTPClient();
+		await client.connect(port);
+		client.send("EHLO localhost");
+		const lines: string[] = [];
+		while (true) {
+			const line = await client.readLine();
+			lines.push(line);
+			if (/^\d{3} /.test(line)) break;
+		}
+		expect(lines.join("\n")).toContain("STARTTLS");
+
+		client.close();
+		await new Promise<void>((r) => server.close(r));
+	});
+
+	test("STARTTLS is hidden when hideSTARTTLS is true", async () => {
+		const { server, port } = makeServer({
+			authOptional: true,
+			disableReverseLookup: true,
+			hideSTARTTLS: true,
+		});
+
+		const client = new SMTPClient();
+		await client.connect(port);
+		client.send("EHLO localhost");
+		const lines: string[] = [];
+		while (true) {
+			const line = await client.readLine();
+			lines.push(line);
+			if (/^\d{3} /.test(line)) break;
+		}
+		expect(lines.join("\n")).not.toContain("STARTTLS");
+
+		client.close();
+		await new Promise<void>((r) => server.close(r));
+	});
+
+	// oven-sh/bun#25044: server-side socket.upgradeTLS() requires isServer:true,
+	// which only works on Bun builds containing oven-sh/bun#32630 (canary only
+	// as of Bun 1.3.14, latest stable). Gated by detectStartTLSSupport() so this
+	// suite stays green on stable Bun and self-enables once the fix ships.
+	describe.skipIf(!STARTTLS_UPGRADE_SUPPORTED)(
+		"STARTTLS upgrade (requires Bun with server-side TLS upgrade support)",
+		() => {
+			test("upgrade succeeds, session becomes secure, STARTTLS no longer advertised", async () => {
+				let secureInOnSecure = false;
+				const { server, port } = makeServer({
+					authOptional: true,
+					disableReverseLookup: true,
+					onSecure(_socket, session, cb) {
+						secureInOnSecure = session.secure;
+						cb();
+					},
+				});
+
+				const client = new SMTPClient();
+				await client.connect(port);
+				client.send("EHLO localhost");
+				await client.readResponse();
+
+				client.send("STARTTLS");
+				expect(await client.readResponse()).toMatch(/^220/);
+				await client.upgradeTLS();
+
+				client.send("EHLO localhost");
+				const lines: string[] = [];
+				while (true) {
+					const line = await client.readLine();
+					lines.push(line);
+					if (/^\d{3} /.test(line)) break;
+				}
+				expect(lines.join("\n")).not.toContain("STARTTLS");
+				expect(secureInOnSecure).toBe(true);
+
+				client.close();
+				await new Promise<void>((r) => server.close(r));
+			});
+
+			test("STARTTLS returns 503 when connection is already TLS", async () => {
+				const { server, port } = makeServer({
+					authOptional: true,
+					disableReverseLookup: true,
+				});
+				const client = new SMTPClient();
+				await client.connect(port);
+				client.send("EHLO localhost");
+				await client.readResponse();
+				client.send("STARTTLS");
+				expect(await client.readResponse()).toMatch(/^220/);
+				await client.upgradeTLS();
+
+				client.send("STARTTLS");
+				const resp = await client.readResponse();
+				expect(resp).toMatch(/^503/);
+
+				client.close();
+				await new Promise<void>((r) => server.close(r));
+			});
+
+			test("mail transaction works after STARTTLS upgrade", async () => {
+				let receivedBody = "";
+				let sawSecure = false;
+				const { server, port } = makeServer({
+					authOptional: true,
+					disableReverseLookup: true,
+					async onData(stream, session, cb) {
+						sawSecure = session.secure;
+						const chunks: Uint8Array[] = [];
+						for await (const chunk of stream) chunks.push(chunk);
+						receivedBody = Buffer.concat(chunks).toString();
+						cb(null, "OK: queued");
+					},
+				});
+
+				const client = new SMTPClient();
+				await client.connect(port);
+				client.send("EHLO localhost");
+				await client.readResponse();
+				client.send("STARTTLS");
+				expect(await client.readResponse()).toMatch(/^220/);
+				await client.upgradeTLS();
+
+				client.send("EHLO localhost");
+				await client.readResponse();
+				client.send("MAIL FROM:<a@b.com>");
+				expect(await client.readResponse()).toMatch(/^250/);
+				client.send("RCPT TO:<c@d.com>");
+				expect(await client.readResponse()).toMatch(/^250/);
+				client.send("DATA");
+				expect(await client.readResponse()).toMatch(/^354/);
+				client.sendRaw("Subject: secure\r\n\r\nhello over tls\r\n.\r\n");
+				expect(await client.readResponse()).toMatch(/^250/);
+
+				expect(receivedBody).toContain("hello over tls");
+				expect(sawSecure).toBe(true);
+
+				client.close();
+				await new Promise<void>((r) => server.close(r));
+			});
+		},
+	);
 });
