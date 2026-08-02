@@ -26,8 +26,7 @@
 
 A fast SMTP/LMTP server library built natively on Bun.
 
-**Up to 3x faster than `smtp-server`** on large message throughput, and 54%
-faster on concurrent mail transactions — see [Benchmarks](#benchmarks).
+**Up to 3x faster than `smtp-server`** — see [Benchmarks](#benchmarks).
 
 ```ts
 import { SMTPServer } from "bun-smtp";
@@ -57,6 +56,7 @@ bun add bun-smtp
 
 ## Features
 
+- **Ultrafast** ⚡ - Up to 3x faster than `smtp-server` on large payloads, 54% faster on concurrent transactions. See [Benchmarks](#benchmarks).
 - **Bun-native** 🚀 - Uses `Bun.listen()` and `Bun.CryptoHasher`. No Node.js compat layer. STARTTLS works via `socket.upgradeTLS()` on Bun canary ([oven-sh/bun#25044](https://github.com/oven-sh/bun/issues/25044) is closed upstream; not yet in a stable release).
 - **Drop-in replacement** 🔄 - Same constructor options, callbacks, and event names as `smtp-server`. Minimal migration effort.
 - **Full SMTP support** 📨 - HELO, EHLO, MAIL FROM, RCPT TO, DATA, STARTTLS, LMTP, and more.
@@ -66,17 +66,14 @@ bun add bun-smtp
 
 ## Benchmarks
 
-Measured with [`bench/run.ts`](bench/run.ts): bun-smtp and `smtp-server` run as
-separate OS processes (Bun vs Node) with identical options, driven by the same
-raw-TCP client, median of 3 timed runs per scenario. Full methodology and
-machine details in [`bench/RESULTS.md`](bench/RESULTS.md).
+vs `smtp-server` on Node, same machine, same client:
 
-| Scenario | bun-smtp (Bun) | smtp-server (Node) | bun-smtp advantage |
+| Scenario | bun-smtp | smtp-server | Advantage |
 | --- | --- | --- | --- |
-| Concurrent transaction throughput (50 connections, MAIL/RCPT/DATA) | 43,650 msg/s | 28,257 msg/s | **+54.5%** |
-| Large payload throughput (10 connections, 1MB bodies) | 1,669 MB/s | 573 MB/s | **+191.1%** |
+| Concurrent transactions (50 connections) | 43,650 msg/s | 28,257 msg/s | **+54.5%** |
+| Large payloads (10 connections, 1MB bodies) | 1,669 MB/s | 573 MB/s | **+191.1%** |
 
-Run it yourself: `bun run bench`.
+Methodology and full results: [`bench/RESULTS.md`](bench/RESULTS.md). Run it yourself: `bun run bench`.
 
 ## Documentation
 

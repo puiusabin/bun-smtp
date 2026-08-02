@@ -14,6 +14,9 @@ hero:
       link: https://github.com/puiusabin/bun-smtp
 
 features:
+  - icon: ⚡
+    title: Ultrafast
+    details: Up to 3x faster than smtp-server on large payloads, 54% faster on concurrent transactions.
   - icon: 🐰
     title: Bun-native
     details: Built on Bun.listen(), socket.upgradeTLS(), and Bun.CryptoHasher. No Node.js compat layer.
