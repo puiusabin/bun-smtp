@@ -200,9 +200,9 @@ export const SASL_CRAM_MD5: AuthHandler = (ctx, args, done) => {
 		return done();
 	}
 
-	const rand = String(Math.random())
-		.replace(/^[0.]+/, "")
-		.slice(0, 8);
+	const rand = Buffer.from(crypto.getRandomValues(new Uint8Array(8))).toString(
+		"hex",
+	);
 	const ts = Math.floor(Date.now() / 1000);
 	const challenge = `<${rand}${ts}@${ctx.name}>`;
 
