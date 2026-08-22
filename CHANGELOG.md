@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/puiusabin/bun-smtp/compare/v0.4.0...v0.4.1) (2026-08-22)
+
+
+### Bug Fixes
+
+* **tls:** drop Bun canary requirement now that STARTTLS is stable in 1.4 ([9dee684](https://github.com/puiusabin/bun-smtp/commit/9dee6846934dbb03651f48642d075e1fabccd027))
+
 ## [0.4.0](https://github.com/puiusabin/bun-smtp/compare/v0.3.1...v0.4.0) (2026-08-02)
 
 
