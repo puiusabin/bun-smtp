@@ -1,8 +1,8 @@
 import type { Socket } from "bun";
 
-// @types/bun (as of 1.3.14) doesn't yet expose the `isServer` option added by
-// oven-sh/bun#32630 for server-side socket.upgradeTLS() (oven-sh/bun#25044).
-// Remove this augmentation once @types/bun ships it upstream.
+// @types/bun doesn't yet expose the `isServer` option for server-side
+// socket.upgradeTLS() (oven-sh/bun#32630). Remove this augmentation once
+// @types/bun ships it upstream.
 declare module "bun" {
 	interface TLSUpgradeOptions<Data> {
 		isServer?: boolean;

@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        bun-version: ["latest", "1.2", "canary"]
+        bun-version: ["latest", "1.4", "canary"]
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2

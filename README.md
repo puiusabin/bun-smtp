@@ -12,18 +12,6 @@
 [![GitHub commit activity](https://img.shields.io/github/commit-activity/m/puiusabin/bun-smtp)](https://github.com/puiusabin/bun-smtp/pulse)
 [![GitHub last commit](https://img.shields.io/github/last-commit/puiusabin/bun-smtp)](https://github.com/puiusabin/bun-smtp/commits/main)
 
-> [!WARNING]
-> **STARTTLS requires a Bun canary build.** Bun's server-side `socket.upgradeTLS()` was
-> blocked since bun-smtp's inception by [oven-sh/bun#25044](https://github.com/oven-sh/bun/issues/25044)
-> (closed 2026-07-24). The fix has landed upstream — the architecture prerequisite in Bun
-> 1.3.14 ([oven-sh/bun#29932](https://github.com/oven-sh/bun/pull/29932)) plus the actual
-> `isServer` support in [oven-sh/bun#32630](https://github.com/oven-sh/bun/pull/32630) —
-> but as of this writing it's only available on Bun canary builds, not yet in any stable
-> release (latest stable is 1.3.14). On stable Bun, a STARTTLS attempt closes the
-> connection rather than crashing the server. For production on stable Bun, use implicit
-> TLS (port 465) or terminate TLS externally with HAProxy or stunnel; to use STARTTLS
-> today, install Bun canary (`bun upgrade --canary`).
-
 An ultrafast SMTP/LMTP server library built natively on Bun.
 
 ```ts
@@ -55,7 +43,7 @@ bun add bun-smtp
 ## Features
 
 - **Ultrafast** ⚡ - Up to 3x faster than `smtp-server` on large payloads, 54% faster on concurrent transactions. See [Benchmarks](#benchmarks).
-- **Bun-native** 🚀 - Uses `Bun.listen()` and `Bun.CryptoHasher`. No Node.js compat layer. STARTTLS works via `socket.upgradeTLS()` on Bun canary ([oven-sh/bun#25044](https://github.com/oven-sh/bun/issues/25044) is closed upstream; not yet in a stable release).
+- **Bun-native** 🚀 - Uses `Bun.listen()`, `socket.upgradeTLS()`, and `Bun.CryptoHasher`. No Node.js compat layer.
 - **Drop-in replacement** 🔄 - Same constructor options, callbacks, and event names as `smtp-server`. Minimal migration effort.
 
 - **Delightful DX** ✨ - Fully typed API, sensible defaults, and minimal boilerplate.

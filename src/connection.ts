@@ -594,10 +594,9 @@ const HANDLERS: Record<string, Handler> = {
 
 		ctx.upgrading = true;
 
-		// Server-side upgradeTLS requires isServer:true (oven-sh/bun#25044, fixed by
-		// oven-sh/bun#32630). That fix isn't in every Bun release yet, so upgradeTLS
-		// still throws synchronously on older runtimes — catch it so the error doesn't
-		// propagate as an unhandled rejection and the connection closes cleanly instead.
+		// upgradeTLS() can throw synchronously on malformed TLS config — catch it so
+		// the error doesn't propagate as an unhandled rejection and the connection
+		// closes cleanly instead.
 		try {
 			ctx.socket.upgradeTLS<ConnectionContext>({
 				isServer: true,

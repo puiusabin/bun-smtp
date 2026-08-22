@@ -1,13 +1,5 @@
 # TLS & STARTTLS
 
-::: warning Bun version requirement for STARTTLS
-Server-side STARTTLS depends on Bun's `socket.upgradeTLS({ isServer: true })` support,
-added upstream in [oven-sh/bun#32630](https://github.com/oven-sh/bun/pull/32630). As of
-this writing that fix is only available on **Bun canary** (`bun upgrade --canary`), not
-yet in a stable release. On older Bun, a `STARTTLS` attempt closes the connection rather
-than crashing the server. Implicit TLS (below) works on any Bun version.
-:::
-
 ## Modes
 
 bun-smtp supports two TLS modes:

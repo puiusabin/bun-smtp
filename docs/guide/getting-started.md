@@ -6,7 +6,7 @@
 bun add bun-smtp
 ```
 
-Requires Bun 1.2.0 or later.
+Requires Bun 1.4.0 or later.
 
 ## Minimal server
 
