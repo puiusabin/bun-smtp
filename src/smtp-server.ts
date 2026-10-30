@@ -11,7 +11,7 @@ import type { TCPSocketListener } from "bun";
 import {
 	closeSocket,
 	createContext,
-	enqueueChunk,
+	handleChunk,
 	handleClose,
 	handleError,
 	initConnection,
@@ -297,13 +297,7 @@ export class SMTPServer implements ServerInstance {
 					// Ignore raw encrypted bytes once TLS upgrade is in progress or done.
 					// The TLS socket handler (in the STARTTLS command) handles decrypted data.
 					if (ctx.upgrading || ctx.tlsUpgraded) return;
-					// Data-mode chunks bypass the command queue to avoid deadlocking the
-					// drain loop (which is suspended while awaiting the onData callback).
-					if (ctx.parser.dataMode) {
-						ctx.parser.feedDataMode(chunk);
-					} else {
-						enqueueChunk(ctx, chunk);
-					}
+					handleChunk(ctx, chunk);
 				},
 
 				close(socket) {

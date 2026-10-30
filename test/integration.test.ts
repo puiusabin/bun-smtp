@@ -1174,3 +1174,35 @@ describe("STARTTLS", () => {
 		});
 	});
 });
+
+// ---- Hardening -------------------------------------------------------------
+
+describe("Hardening", () => {
+	async function startData(client: SMTPClient): Promise<void> {
+		client.send("EHLO localhost");
+		await client.readResponse();
+		client.send("MAIL FROM:<a@b.com>");
+		expect(await client.readResponse()).toMatch(/^250/);
+		client.send("RCPT TO:<c@d.com>");
+		expect(await client.readResponse()).toMatch(/^250/);
+		client.send("DATA");
+		expect(await client.readResponse()).toMatch(/^354/);
+	}
+
+	test("DATA body chunks reset the inactivity timeout", async () => {
+		const { server, port } = makeServer({ socketTimeout: 300 });
+		const client = new SMTPClient();
+		await client.connect(port);
+		await startData(client);
+
+		for (let i = 0; i < 6; i++) {
+			client.sendRaw(`line ${i}\r\n`);
+			await Bun.sleep(100);
+		}
+		client.sendRaw(".\r\n");
+		expect(await client.readResponse()).toMatch(/^250/);
+
+		client.close();
+		await new Promise<void>((r) => server.close(r));
+	});
+});

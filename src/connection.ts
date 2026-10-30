@@ -254,6 +254,19 @@ async function connectionReady(ctx: ConnectionContext): Promise<void> {
 
 // ---- Chunk processing queue -------------------------------------------------
 
+/**
+ * Route a raw socket chunk. Data-mode chunks bypass the command queue to avoid
+ * deadlocking the drain loop (which is suspended while awaiting onData).
+ */
+export function handleChunk(ctx: ConnectionContext, chunk: Buffer): void {
+	if (ctx.parser.dataMode) {
+		resetTimeout(ctx);
+		ctx.parser.feedDataMode(chunk);
+	} else {
+		enqueueChunk(ctx, chunk);
+	}
+}
+
 export function enqueueChunk(ctx: ConnectionContext, raw: Buffer): void {
 	ctx.pendingChunks.push(raw); // Bun delivers a fresh Buffer per data event — caller owns it
 	if (!ctx.processing && !ctx.upgrading) {
@@ -604,12 +617,7 @@ const HANDLERS: Record<string, Handler> = {
 				tls: { key: ctx.server.tlsKey, cert: ctx.server.tlsCert },
 				socket: {
 					data(socket, chunk) {
-						const c = socket.data;
-						if (c.parser.dataMode) {
-							c.parser.feedDataMode(chunk);
-						} else {
-							enqueueChunk(c, chunk);
-						}
+						handleChunk(socket.data, chunk);
 					},
 					drain(_socket) {},
 					close(socket) {
