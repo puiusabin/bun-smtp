@@ -254,6 +254,14 @@ async function connectionReady(ctx: ConnectionContext): Promise<void> {
 	sendRaw(ctx, buildResponse(ctx, 220, greeting, false));
 }
 
+/** Copy negotiated cipher, protocol version and SNI name into the session. */
+export function applyTLSInfo(ctx: ConnectionContext): void {
+	const { name, standardName } = ctx.socket.getCipher();
+	ctx.tlsOptions = { name, standardName, version: ctx.socket.getTLSVersion() };
+	ctx.session.tlsOptions = ctx.tlsOptions;
+	ctx.session.servername = ctx.socket.getServername() || undefined;
+}
+
 // ---- Chunk processing queue -------------------------------------------------
 
 /**
@@ -656,8 +664,7 @@ const HANDLERS: Record<string, Handler> = {
 						c.socket = socket as Socket<ConnectionContext>;
 						c.secure = true;
 						c.session.secure = true;
-						c.tlsOptions = { name: "TLS" };
-						c.session.tlsOptions = c.tlsOptions;
+						applyTLSInfo(c);
 						// Client must re-authenticate after STARTTLS.
 						c.session.user = undefined;
 						c.unauthCmds = 0;

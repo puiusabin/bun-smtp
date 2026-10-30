@@ -9,6 +9,7 @@
 import { hostname } from "node:os";
 import type { TCPSocketListener } from "bun";
 import {
+	applyTLSInfo,
 	closeSocket,
 	createContext,
 	handleChunk,
@@ -298,6 +299,10 @@ export class SMTPServer implements ServerInstance {
 					// The TLS socket handler (in the STARTTLS command) handles decrypted data.
 					if (ctx.upgrading || ctx.tlsUpgraded) return;
 					handleChunk(ctx, chunk);
+				},
+
+				handshake(socket, success) {
+					if (success) applyTLSInfo(socket.data);
 				},
 
 				close(socket) {

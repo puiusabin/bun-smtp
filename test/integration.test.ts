@@ -7,7 +7,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { SMTPServer } from "../src/smtp-server.ts";
-import type { SMTPServerOptions } from "../src/types.ts";
+import type { SMTPServerOptions, SMTPSession } from "../src/types.ts";
 
 // x509 verify error codes (Node/OpenSSL) that mean "peer's cert isn't trusted" —
 // expected and safe to ignore wherever we pass rejectUnauthorized: false against
@@ -1332,6 +1332,66 @@ describe("Hardening", () => {
 		await closed.promise;
 		expect(received).toBe("554 Not today\r\n");
 
+		await new Promise<void>((r) => server.close(r));
+	});
+
+	test("STARTTLS populates session.tlsOptions", async () => {
+		let tlsOptions: unknown = null;
+		const { server, port } = makeServer({
+			onSecure(_socket, session, cb) {
+				tlsOptions = session.tlsOptions;
+				cb();
+			},
+		});
+		const client = new SMTPClient();
+		await client.connect(port);
+		client.send("STARTTLS");
+		expect(await client.readResponse()).toMatch(/^220/);
+		await client.upgradeTLS();
+		client.send("NOOP");
+		expect(await client.readResponse()).toMatch(/^250/);
+
+		expect(tlsOptions).toMatchObject({
+			name: expect.stringMatching(/^TLS_/),
+			version: expect.stringMatching(/^TLSv1\.[23]$/),
+		});
+
+		client.close();
+		await new Promise<void>((r) => server.close(r));
+	});
+
+	test("implicit TLS populates tlsOptions and servername", async () => {
+		let session: SMTPSession | null = null;
+		const { server, port } = makeServer({
+			secure: true,
+			onMailFrom(_addr, s, cb) {
+				session = structuredClone(s);
+				cb();
+			},
+		});
+		let received = "";
+		await Bun.sleep(50);
+		const socket = await Bun.connect({
+			hostname: "127.0.0.1",
+			port,
+			tls: { rejectUnauthorized: false, serverName: "mail.test" },
+			socket: {
+				data(_s, d) {
+					received += Buffer.from(d).toString();
+				},
+			},
+		});
+		while (!received.includes("220 ")) await Bun.sleep(10);
+		socket.write("EHLO x\r\nMAIL FROM:<a@b.com>\r\n");
+		while (!received.includes("Accepted")) await Bun.sleep(10);
+
+		expect(session).toMatchObject({
+			secure: true,
+			servername: "mail.test",
+			tlsOptions: { version: expect.stringMatching(/^TLSv1\.[23]$/) },
+		});
+
+		socket.end();
 		await new Promise<void>((r) => server.close(r));
 	});
 
