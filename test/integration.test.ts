@@ -1284,6 +1284,57 @@ describe("Hardening", () => {
 		await new Promise<void>((r) => server.close(r));
 	});
 
+	test("onSecure rejection after STARTTLS replies and closes", async () => {
+		const errors: Error[] = [];
+		const { server, port } = makeServer({
+			onSecure(_socket, _session, cb) {
+				cb(Object.assign(new Error("Not today"), { responseCode: 550 }));
+			},
+		});
+		server.on("error", (err) => errors.push(err));
+		const client = new SMTPClient();
+		await client.connect(port);
+		client.send("STARTTLS");
+		expect(await client.readResponse()).toMatch(/^220/);
+		await client.upgradeTLS();
+
+		expect(await client.readResponse()).toBe("550 Not today");
+		await Bun.sleep(50);
+		expect(server.connections.size).toBe(0);
+		expect(errors.map((e) => e.message)).toEqual(["Not today"]);
+
+		client.close();
+		await new Promise<void>((r) => server.close(r));
+	});
+
+	test("onSecure rejection on implicit TLS skips the greeting", async () => {
+		const { server, port } = makeServer({
+			secure: true,
+			onSecure(_socket, _session, cb) {
+				cb(new Error("Not today"));
+			},
+		});
+		server.on("error", () => {});
+		let received = "";
+		const closed = Promise.withResolvers<void>();
+		await Bun.sleep(50);
+		await Bun.connect({
+			hostname: "127.0.0.1",
+			port,
+			tls: { rejectUnauthorized: false },
+			socket: {
+				data(_s, d) {
+					received += Buffer.from(d).toString();
+				},
+				close: () => closed.resolve(),
+			},
+		});
+		await closed.promise;
+		expect(received).toBe("554 Not today\r\n");
+
+		await new Promise<void>((r) => server.close(r));
+	});
+
 	for (const tls of [false, true]) {
 		test(`slow consumer receives a 5 MB body intact${tls ? " over STARTTLS" : ""}`, async () => {
 			let received: Buffer | null = null;

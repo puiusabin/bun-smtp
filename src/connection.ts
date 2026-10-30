@@ -240,10 +240,7 @@ async function connectionReady(ctx: ConnectionContext): Promise<void> {
 				if (err) reject(err);
 				else resolve();
 			});
-		}).catch((err: SMTPError) => {
-			handleError(ctx, err);
-			return;
-		});
+		}).catch((err: SMTPError) => rejectSecure(ctx, err));
 	}
 
 	if (ctx.closing || ctx.closed) return;
@@ -680,7 +677,7 @@ const HANDLERS: Record<string, Handler> = {
 							})
 							.catch((err: SMTPError) => {
 								c.upgrading = false;
-								handleError(c, err);
+								rejectSecure(c, err);
 							});
 					},
 				},
@@ -1465,6 +1462,13 @@ export function handleClose(ctx: ConnectionContext): void {
 	if (ctx.server.closing) {
 		ctx.server._notifyConnectionClosed();
 	}
+}
+
+/** onSecure rejected: reply, close, and surface the error. */
+function rejectSecure(ctx: ConnectionContext, err: SMTPError): void {
+	sendRaw(ctx, buildResponse(ctx, err.responseCode ?? 554, err.message, false));
+	closeSocket(ctx);
+	handleError(ctx, err);
 }
 
 export function handleError(ctx: ConnectionContext, err: SMTPError): void {
