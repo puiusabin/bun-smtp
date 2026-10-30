@@ -929,14 +929,16 @@ const HANDLERS: Record<string, Handler> = {
 		// Switch parser to data mode
 		ctx.parser.startDataMode(ctx.server.options.size ?? Infinity, {
 			onData(chunk) {
-				controller.enqueue(new Uint8Array(chunk));
 				ctx.dataBytes += chunk.length;
 				if (
 					ctx.server.options.size &&
 					ctx.dataBytes > ctx.server.options.size
 				) {
+					// Keep scanning for the terminator but stop buffering the body.
 					stream.sizeExceeded = true;
+					return;
 				}
+				controller.enqueue(new Uint8Array(chunk));
 			},
 			onDataEnd(byteLength, sizeExceeded) {
 				stream.byteLength = byteLength;

@@ -1205,4 +1205,26 @@ describe("Hardening", () => {
 		client.close();
 		await new Promise<void>((r) => server.close(r));
 	});
+
+	test("body bytes past the size limit are not buffered", async () => {
+		let received = 0;
+		const { server, port } = makeServer({
+			size: 1000,
+			async onData(stream, _session, cb) {
+				for await (const chunk of stream) received += chunk.length;
+				cb(null);
+			},
+		});
+		const client = new SMTPClient();
+		await client.connect(port);
+		await startData(client);
+
+		client.sendRaw(`${"x".repeat(78)}\r\n`.repeat(640));
+		client.sendRaw(".\r\n");
+		expect(await client.readResponse()).toMatch(/^552/);
+		expect(received).toBeLessThanOrEqual(1000);
+
+		client.close();
+		await new Promise<void>((r) => server.close(r));
+	});
 });
