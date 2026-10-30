@@ -99,6 +99,36 @@ describe("SMTPParser – command mode", () => {
 		const lines = p.feedCommandMode(Buffer.from("EHLO x\r\n"));
 		expect(lines).toEqual([]);
 	});
+
+	test("sets lineTooLong when an unterminated line exceeds the cap", () => {
+		const p = new SMTPParser(16);
+		expect(p.feedCommandMode(Buffer.from("NOOP\r\n0123456789"))).toEqual([
+			"NOOP",
+		]);
+		expect(p.lineTooLong).toBe(false);
+		expect(p.feedCommandMode(Buffer.from("0123456789"))).toEqual([]);
+		expect(p.lineTooLong).toBe(true);
+		expect(p.feedCommandMode(Buffer.from("\r\nNOOP\r\n"))).toEqual([]);
+	});
+
+	test("sets lineTooLong for a terminated line over the cap", () => {
+		const p = new SMTPParser(16);
+		const lines = p.feedCommandMode(
+			Buffer.from("NOOP\r\nNOOP 0123456789abcdef\r\nNOOP\r\n"),
+		);
+		expect(lines).toEqual(["NOOP"]);
+		expect(p.lineTooLong).toBe(true);
+	});
+
+	test("lines under the cap spanning many chunks are fine", () => {
+		const p = new SMTPParser(32);
+		const lines: string[] = [];
+		for (const c of ["MAIL ", "FROM:", "<a@b.c", ">\r\n"]) {
+			lines.push(...p.feedCommandMode(Buffer.from(c)));
+		}
+		expect(p.lineTooLong).toBe(false);
+		expect(lines).toEqual(["MAIL FROM:<a@b.c>"]);
+	});
 });
 
 // ---- Data mode – basic -----------------------------------------------------

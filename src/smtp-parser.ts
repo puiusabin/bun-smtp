@@ -37,7 +37,14 @@ export class SMTPParser {
 	private _dataBytes = 0;
 	private _dataMaxBytes = Infinity;
 	private _callbacks: DataCallbacks | null = null;
+	private _maxLineBytes: number;
 	isClosed = false;
+	/** Set once a command line exceeds maxLineBytes; parsing stops there. */
+	lineTooLong = false;
+
+	constructor(maxLineBytes = Infinity) {
+		this._maxLineBytes = maxLineBytes;
+	}
 
 	// ---- Command mode -------------------------------------------------------
 
@@ -47,7 +54,7 @@ export class SMTPParser {
 	 * Must NOT be called while in data mode.
 	 */
 	feedCommandMode(chunk: Buffer): string[] {
-		if (this.isClosed || this._dataMode) return [];
+		if (this.isClosed || this._dataMode || this.lineTooLong) return [];
 
 		const buf = this._remainder
 			? Buffer.concat([this._remainder, chunk])
@@ -59,11 +66,20 @@ export class SMTPParser {
 			const nl = buf.indexOf(0x0a, pos);
 			if (nl === -1) break;
 			const end = nl > pos && buf[nl - 1] === 0x0d ? nl - 1 : nl;
+			if (end - pos > this._maxLineBytes) {
+				this.lineTooLong = true;
+				this._remainder = null;
+				return lines;
+			}
 			lines.push(buf.subarray(pos, end).toString("utf8"));
 			pos = nl + 1;
 		}
 
 		this._remainder = pos < buf.length ? buf.subarray(pos) : null;
+		if (this._remainder && this._remainder.length > this._maxLineBytes) {
+			this.lineTooLong = true;
+			this._remainder = null;
+		}
 		return lines;
 	}
 

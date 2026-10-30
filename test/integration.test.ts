@@ -1240,6 +1240,23 @@ describe("Hardening", () => {
 		await new Promise<void>((r) => server.close(r));
 	});
 
+	test("overlong command line gets 421 and the connection closes", async () => {
+		const { server, port } = makeServer();
+		const client = new SMTPClient();
+		await client.connect(port);
+
+		client.send(`NOOP ${"x".repeat(12 * 1024)}`);
+		expect(await client.readResponse()).toMatch(/^250/);
+
+		client.sendRaw("x".repeat(20 * 1024));
+		expect(await client.readResponse()).toMatch(/^421/);
+		await Bun.sleep(50);
+		expect(server.connections.size).toBe(0);
+
+		client.close();
+		await new Promise<void>((r) => server.close(r));
+	});
+
 	for (const tls of [false, true]) {
 		test(`slow consumer receives a 5 MB body intact${tls ? " over STARTTLS" : ""}`, async () => {
 			let received: Buffer | null = null;

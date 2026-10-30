@@ -27,6 +27,8 @@ import type {
 
 const SOCKET_TIMEOUT = 60_000;
 const DATA_HIGH_WATER_MARK = 1024 * 1024;
+// RFC 4954 allows AUTH lines up to 12288 octets (long XOAUTH2 tokens).
+const MAX_LINE_BYTES = 16 * 1024;
 
 // Enhanced status codes (RFC 3463)
 const ENHANCED_STATUS_CODES: Record<number, string> = {
@@ -157,7 +159,7 @@ export function createContext(
 		socket,
 		processing: false,
 		pendingChunks: [],
-		parser: new SMTPParser(),
+		parser: new SMTPParser(MAX_LINE_BYTES),
 		ready: false,
 		secure: !!server.options.secure,
 		upgrading: false,
@@ -304,6 +306,10 @@ async function processChunk(
 	for (const line of lines) {
 		if (ctx.closed) break;
 		await processLine(ctx, line);
+	}
+
+	if (ctx.parser.lineTooLong) {
+		sendRaw(ctx, buildResponse(ctx, 421, "Error: line too long"));
 	}
 }
 
