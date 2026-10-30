@@ -29,6 +29,7 @@ const SOCKET_TIMEOUT = 60_000;
 const DATA_HIGH_WATER_MARK = 1024 * 1024;
 // RFC 4954 allows AUTH lines up to 12288 octets (long XOAUTH2 tokens).
 const MAX_LINE_BYTES = 16 * 1024;
+const MAX_PENDING_BYTES = 1024 * 1024;
 
 // Enhanced status codes (RFC 3463)
 const ENHANCED_STATUS_CODES: Record<number, string> = {
@@ -159,6 +160,7 @@ export function createContext(
 		socket,
 		processing: false,
 		pendingChunks: [],
+		pendingBytes: 0,
 		parser: new SMTPParser(MAX_LINE_BYTES),
 		ready: false,
 		secure: !!server.options.secure,
@@ -271,6 +273,15 @@ export function handleChunk(ctx: ConnectionContext, chunk: Buffer): void {
 }
 
 export function enqueueChunk(ctx: ConnectionContext, raw: Buffer): void {
+	if (ctx.closing || ctx.closed) return;
+	ctx.pendingBytes += raw.length;
+	if (ctx.pendingBytes > MAX_PENDING_BYTES) {
+		ctx.pendingChunks.length = 0;
+		ctx.pendingBytes = 0;
+		sendRaw(ctx, buildResponse(ctx, 421, "Error: too much pipelined data"));
+		closeSocket(ctx);
+		return;
+	}
 	ctx.pendingChunks.push(raw); // Bun delivers a fresh Buffer per data event — caller owns it
 	if (!ctx.processing && !ctx.upgrading) {
 		ctx.processing = true;
@@ -283,6 +294,7 @@ async function drainChunks(ctx: ConnectionContext): Promise<void> {
 		if (ctx.upgrading) break;
 		const chunk = ctx.pendingChunks.shift();
 		if (!chunk) break;
+		ctx.pendingBytes -= chunk.length;
 		await processChunk(ctx, chunk);
 	}
 	ctx.processing = false;

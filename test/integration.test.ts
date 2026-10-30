@@ -1257,6 +1257,33 @@ describe("Hardening", () => {
 		await new Promise<void>((r) => server.close(r));
 	});
 
+	test("pipelined flood behind a slow hook gets 421", async () => {
+		let release = (): void => {};
+		const { server, port } = makeServer({
+			onMailFrom(_addr, _session, cb) {
+				release = () => cb();
+			},
+		});
+		const client = new SMTPClient();
+		await client.connect(port);
+		client.send("EHLO localhost");
+		await client.readResponse();
+
+		// Let MAIL arrive in its own chunk so the drain loop is parked on the hook.
+		client.send("MAIL FROM:<a@b.com>");
+		await Bun.sleep(50);
+		await client
+			.sendAll(Buffer.from("NOOP\r\n".repeat(350_000)))
+			.catch(() => {});
+		expect(await client.readResponse()).toMatch(/^421/);
+		await Bun.sleep(50);
+		expect(server.connections.size).toBe(0);
+
+		release();
+		client.close();
+		await new Promise<void>((r) => server.close(r));
+	});
+
 	for (const tls of [false, true]) {
 		test(`slow consumer receives a 5 MB body intact${tls ? " over STARTTLS" : ""}`, async () => {
 			let received: Buffer | null = null;
