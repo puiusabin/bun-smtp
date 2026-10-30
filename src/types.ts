@@ -276,6 +276,7 @@ export interface ConnectionContext {
 	// Async processing queue
 	processing: boolean;
 	pendingChunks: Buffer[];
+	pendingBytes: number;
 
 	// Parser
 	parser: import("./smtp-parser.ts").SMTPParser;

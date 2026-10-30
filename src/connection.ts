@@ -26,6 +26,10 @@ import type {
 } from "./types.ts";
 
 const SOCKET_TIMEOUT = 60_000;
+const DATA_HIGH_WATER_MARK = 1024 * 1024;
+// RFC 4954 allows AUTH lines up to 12288 octets (long XOAUTH2 tokens).
+const MAX_LINE_BYTES = 16 * 1024;
+const MAX_PENDING_BYTES = 1024 * 1024;
 
 // Enhanced status codes (RFC 3463)
 const ENHANCED_STATUS_CODES: Record<number, string> = {
@@ -156,7 +160,8 @@ export function createContext(
 		socket,
 		processing: false,
 		pendingChunks: [],
-		parser: new SMTPParser(),
+		pendingBytes: 0,
+		parser: new SMTPParser(MAX_LINE_BYTES),
 		ready: false,
 		secure: !!server.options.secure,
 		upgrading: false,
@@ -235,10 +240,7 @@ async function connectionReady(ctx: ConnectionContext): Promise<void> {
 				if (err) reject(err);
 				else resolve();
 			});
-		}).catch((err: SMTPError) => {
-			handleError(ctx, err);
-			return;
-		});
+		}).catch((err: SMTPError) => rejectSecure(ctx, err));
 	}
 
 	if (ctx.closing || ctx.closed) return;
@@ -252,9 +254,39 @@ async function connectionReady(ctx: ConnectionContext): Promise<void> {
 	sendRaw(ctx, buildResponse(ctx, 220, greeting, false));
 }
 
+/** Copy negotiated cipher, protocol version and SNI name into the session. */
+export function applyTLSInfo(ctx: ConnectionContext): void {
+	const { name, standardName } = ctx.socket.getCipher();
+	ctx.tlsOptions = { name, standardName, version: ctx.socket.getTLSVersion() };
+	ctx.session.tlsOptions = ctx.tlsOptions;
+	ctx.session.servername = ctx.socket.getServername() || undefined;
+}
+
 // ---- Chunk processing queue -------------------------------------------------
 
+/**
+ * Route a raw socket chunk. Data-mode chunks bypass the command queue to avoid
+ * deadlocking the drain loop (which is suspended while awaiting onData).
+ */
+export function handleChunk(ctx: ConnectionContext, chunk: Buffer): void {
+	if (ctx.parser.dataMode) {
+		resetTimeout(ctx);
+		ctx.parser.feedDataMode(chunk);
+	} else {
+		enqueueChunk(ctx, chunk);
+	}
+}
+
 export function enqueueChunk(ctx: ConnectionContext, raw: Buffer): void {
+	if (ctx.closing || ctx.closed) return;
+	ctx.pendingBytes += raw.length;
+	if (ctx.pendingBytes > MAX_PENDING_BYTES) {
+		ctx.pendingChunks.length = 0;
+		ctx.pendingBytes = 0;
+		sendRaw(ctx, buildResponse(ctx, 421, "Error: too much pipelined data"));
+		closeSocket(ctx);
+		return;
+	}
 	ctx.pendingChunks.push(raw); // Bun delivers a fresh Buffer per data event — caller owns it
 	if (!ctx.processing && !ctx.upgrading) {
 		ctx.processing = true;
@@ -267,6 +299,7 @@ async function drainChunks(ctx: ConnectionContext): Promise<void> {
 		if (ctx.upgrading) break;
 		const chunk = ctx.pendingChunks.shift();
 		if (!chunk) break;
+		ctx.pendingBytes -= chunk.length;
 		await processChunk(ctx, chunk);
 	}
 	ctx.processing = false;
@@ -290,6 +323,10 @@ async function processChunk(
 	for (const line of lines) {
 		if (ctx.closed) break;
 		await processLine(ctx, line);
+	}
+
+	if (ctx.parser.lineTooLong) {
+		sendRaw(ctx, buildResponse(ctx, 421, "Error: line too long"));
 	}
 }
 
@@ -604,12 +641,7 @@ const HANDLERS: Record<string, Handler> = {
 				tls: { key: ctx.server.tlsKey, cert: ctx.server.tlsCert },
 				socket: {
 					data(socket, chunk) {
-						const c = socket.data;
-						if (c.parser.dataMode) {
-							c.parser.feedDataMode(chunk);
-						} else {
-							enqueueChunk(c, chunk);
-						}
+						handleChunk(socket.data, chunk);
 					},
 					drain(_socket) {},
 					close(socket) {
@@ -632,8 +664,7 @@ const HANDLERS: Record<string, Handler> = {
 						c.socket = socket as Socket<ConnectionContext>;
 						c.secure = true;
 						c.session.secure = true;
-						c.tlsOptions = { name: "TLS" };
-						c.session.tlsOptions = c.tlsOptions;
+						applyTLSInfo(c);
 						// Client must re-authenticate after STARTTLS.
 						c.session.user = undefined;
 						c.unauthCmds = 0;
@@ -653,7 +684,7 @@ const HANDLERS: Record<string, Handler> = {
 							})
 							.catch((err: SMTPError) => {
 								c.upgrading = false;
-								handleError(c, err);
+								rejectSecure(c, err);
 							});
 					},
 				},
@@ -906,13 +937,25 @@ const HANDLERS: Record<string, Handler> = {
 
 		sendRaw(ctx, R_DATA_354);
 
-		// Create a ReadableStream backed by the dot-unstuffer
+		// Create a ReadableStream backed by the dot-unstuffer. The socket is paused
+		// while the consumer lags DATA_HIGH_WATER_MARK bytes behind.
 		let controller!: ReadableStreamDefaultController<Uint8Array>;
-		const stream = new ReadableStream<Uint8Array>({
-			start(c) {
-				controller = c;
+		let paused = false;
+		const resume = (): void => {
+			if (!paused) return;
+			paused = false;
+			ctx.socket.resume();
+			resetTimeout(ctx);
+		};
+		const stream = new ReadableStream<Uint8Array>(
+			{
+				start(c) {
+					controller = c;
+				},
+				pull: resume,
 			},
-		}) as DataStream;
+			new ByteLengthQueuingStrategy({ highWaterMark: DATA_HIGH_WATER_MARK }),
+		) as DataStream;
 
 		ctx.dataController = controller;
 		ctx.dataStream = stream;
@@ -921,19 +964,28 @@ const HANDLERS: Record<string, Handler> = {
 		// Switch parser to data mode
 		ctx.parser.startDataMode(ctx.server.options.size ?? Infinity, {
 			onData(chunk) {
-				controller.enqueue(new Uint8Array(chunk));
 				ctx.dataBytes += chunk.length;
 				if (
 					ctx.server.options.size &&
 					ctx.dataBytes > ctx.server.options.size
 				) {
+					// Keep scanning for the terminator but stop buffering the body.
 					stream.sizeExceeded = true;
+					return;
+				}
+				controller.enqueue(new Uint8Array(chunk));
+				if (!paused && (controller.desiredSize ?? 1) <= 0) {
+					paused = true;
+					ctx.socket.pause();
 				}
 			},
 			onDataEnd(byteLength, sizeExceeded) {
 				stream.byteLength = byteLength;
 				stream.sizeExceeded = sizeExceeded;
 				controller.close();
+				// pull() never fires on a closed stream; resume so pipelined
+				// commands after the terminator keep flowing.
+				resume();
 				ctx.dataController = null;
 				ctx.dataStream = null;
 			},
@@ -1417,6 +1469,13 @@ export function handleClose(ctx: ConnectionContext): void {
 	if (ctx.server.closing) {
 		ctx.server._notifyConnectionClosed();
 	}
+}
+
+/** onSecure rejected: reply, close, and surface the error. */
+function rejectSecure(ctx: ConnectionContext, err: SMTPError): void {
+	sendRaw(ctx, buildResponse(ctx, err.responseCode ?? 554, err.message, false));
+	closeSocket(ctx);
+	handleError(ctx, err);
 }
 
 export function handleError(ctx: ConnectionContext, err: SMTPError): void {

@@ -7,7 +7,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { SMTPServer } from "../src/smtp-server.ts";
-import type { SMTPServerOptions } from "../src/types.ts";
+import type { SMTPServerOptions, SMTPSession } from "../src/types.ts";
 
 // x509 verify error codes (Node/OpenSSL) that mean "peer's cert isn't trusted" —
 // expected and safe to ignore wherever we pass rejectUnauthorized: false against
@@ -116,6 +116,18 @@ class SMTPClient {
 	/** Send raw bytes (for DATA body). */
 	sendRaw(data: string): void {
 		(this.socket as unknown as { write(data: string): void }).write(data);
+	}
+
+	/** Send a large payload, retrying partial writes (Bun sockets don't buffer). */
+	async sendAll(data: Buffer): Promise<void> {
+		const socket = this.socket as unknown as { write(data: Buffer): number };
+		let offset = 0;
+		while (offset < data.length) {
+			const n = socket.write(data.subarray(offset));
+			if (n < 0) throw new Error("socket closed");
+			offset += n;
+			if (offset < data.length) await Bun.sleep(1);
+		}
 	}
 
 	/**
@@ -1173,4 +1185,247 @@ describe("STARTTLS", () => {
 			await new Promise<void>((r) => server.close(r));
 		});
 	});
+});
+
+// ---- Hardening -------------------------------------------------------------
+
+describe("Hardening", () => {
+	async function startData(client: SMTPClient): Promise<void> {
+		client.send("EHLO localhost");
+		await client.readResponse();
+		client.send("MAIL FROM:<a@b.com>");
+		expect(await client.readResponse()).toMatch(/^250/);
+		client.send("RCPT TO:<c@d.com>");
+		expect(await client.readResponse()).toMatch(/^250/);
+		client.send("DATA");
+		expect(await client.readResponse()).toMatch(/^354/);
+	}
+
+	test("DATA body chunks reset the inactivity timeout", async () => {
+		const { server, port } = makeServer({ socketTimeout: 300 });
+		const client = new SMTPClient();
+		await client.connect(port);
+		await startData(client);
+
+		for (let i = 0; i < 6; i++) {
+			client.sendRaw(`line ${i}\r\n`);
+			await Bun.sleep(100);
+		}
+		client.sendRaw(".\r\n");
+		expect(await client.readResponse()).toMatch(/^250/);
+
+		client.close();
+		await new Promise<void>((r) => server.close(r));
+	});
+
+	test("body bytes past the size limit are not buffered", async () => {
+		let received = 0;
+		const { server, port } = makeServer({
+			size: 1000,
+			async onData(stream, _session, cb) {
+				for await (const chunk of stream) received += chunk.length;
+				cb(null);
+			},
+		});
+		const client = new SMTPClient();
+		await client.connect(port);
+		await startData(client);
+
+		client.sendRaw(`${"x".repeat(78)}\r\n`.repeat(640));
+		client.sendRaw(".\r\n");
+		expect(await client.readResponse()).toMatch(/^552/);
+		expect(received).toBeLessThanOrEqual(1000);
+
+		client.close();
+		await new Promise<void>((r) => server.close(r));
+	});
+
+	test("overlong command line gets 421 and the connection closes", async () => {
+		const { server, port } = makeServer();
+		const client = new SMTPClient();
+		await client.connect(port);
+
+		client.send(`NOOP ${"x".repeat(12 * 1024)}`);
+		expect(await client.readResponse()).toMatch(/^250/);
+
+		client.sendRaw("x".repeat(20 * 1024));
+		expect(await client.readResponse()).toMatch(/^421/);
+		await Bun.sleep(50);
+		expect(server.connections.size).toBe(0);
+
+		client.close();
+		await new Promise<void>((r) => server.close(r));
+	});
+
+	test("pipelined flood behind a slow hook gets 421", async () => {
+		let release = (): void => {};
+		const { server, port } = makeServer({
+			onMailFrom(_addr, _session, cb) {
+				release = () => cb();
+			},
+		});
+		const client = new SMTPClient();
+		await client.connect(port);
+		client.send("EHLO localhost");
+		await client.readResponse();
+
+		// Let MAIL arrive in its own chunk so the drain loop is parked on the hook.
+		client.send("MAIL FROM:<a@b.com>");
+		await Bun.sleep(50);
+		await client
+			.sendAll(Buffer.from("NOOP\r\n".repeat(350_000)))
+			.catch(() => {});
+		expect(await client.readResponse()).toMatch(/^421/);
+		await Bun.sleep(50);
+		expect(server.connections.size).toBe(0);
+
+		release();
+		client.close();
+		await new Promise<void>((r) => server.close(r));
+	});
+
+	test("onSecure rejection after STARTTLS replies and closes", async () => {
+		const errors: Error[] = [];
+		const { server, port } = makeServer({
+			onSecure(_socket, _session, cb) {
+				cb(Object.assign(new Error("Not today"), { responseCode: 550 }));
+			},
+		});
+		server.on("error", (err) => errors.push(err));
+		const client = new SMTPClient();
+		await client.connect(port);
+		client.send("STARTTLS");
+		expect(await client.readResponse()).toMatch(/^220/);
+		await client.upgradeTLS();
+
+		expect(await client.readResponse()).toBe("550 Not today");
+		await Bun.sleep(50);
+		expect(server.connections.size).toBe(0);
+		expect(errors.map((e) => e.message)).toEqual(["Not today"]);
+
+		client.close();
+		await new Promise<void>((r) => server.close(r));
+	});
+
+	test("onSecure rejection on implicit TLS skips the greeting", async () => {
+		const { server, port } = makeServer({
+			secure: true,
+			onSecure(_socket, _session, cb) {
+				cb(new Error("Not today"));
+			},
+		});
+		server.on("error", () => {});
+		let received = "";
+		const closed = Promise.withResolvers<void>();
+		await Bun.sleep(50);
+		await Bun.connect({
+			hostname: "127.0.0.1",
+			port,
+			tls: { rejectUnauthorized: false },
+			socket: {
+				data(_s, d) {
+					received += Buffer.from(d).toString();
+				},
+				close: () => closed.resolve(),
+			},
+		});
+		await closed.promise;
+		expect(received).toBe("554 Not today\r\n");
+
+		await new Promise<void>((r) => server.close(r));
+	});
+
+	test("STARTTLS populates session.tlsOptions", async () => {
+		let tlsOptions: unknown = null;
+		const { server, port } = makeServer({
+			onSecure(_socket, session, cb) {
+				tlsOptions = session.tlsOptions;
+				cb();
+			},
+		});
+		const client = new SMTPClient();
+		await client.connect(port);
+		client.send("STARTTLS");
+		expect(await client.readResponse()).toMatch(/^220/);
+		await client.upgradeTLS();
+		client.send("NOOP");
+		expect(await client.readResponse()).toMatch(/^250/);
+
+		expect(tlsOptions).toMatchObject({
+			name: expect.stringMatching(/^TLS_/),
+			version: expect.stringMatching(/^TLSv1\.[23]$/),
+		});
+
+		client.close();
+		await new Promise<void>((r) => server.close(r));
+	});
+
+	test("implicit TLS populates tlsOptions and servername", async () => {
+		let session: SMTPSession | null = null;
+		const { server, port } = makeServer({
+			secure: true,
+			onMailFrom(_addr, s, cb) {
+				session = structuredClone(s);
+				cb();
+			},
+		});
+		let received = "";
+		await Bun.sleep(50);
+		const socket = await Bun.connect({
+			hostname: "127.0.0.1",
+			port,
+			tls: { rejectUnauthorized: false, serverName: "mail.test" },
+			socket: {
+				data(_s, d) {
+					received += Buffer.from(d).toString();
+				},
+			},
+		});
+		while (!received.includes("220 ")) await Bun.sleep(10);
+		socket.write("EHLO x\r\nMAIL FROM:<a@b.com>\r\n");
+		while (!received.includes("Accepted")) await Bun.sleep(10);
+
+		expect(session).toMatchObject({
+			secure: true,
+			servername: "mail.test",
+			tlsOptions: { version: expect.stringMatching(/^TLSv1\.[23]$/) },
+		});
+
+		socket.end();
+		await new Promise<void>((r) => server.close(r));
+	});
+
+	for (const tls of [false, true]) {
+		test(`slow consumer receives a 5 MB body intact${tls ? " over STARTTLS" : ""}`, async () => {
+			let received: Buffer | null = null;
+			const { server, port } = makeServer({
+				async onData(stream, _session, cb) {
+					await Bun.sleep(200);
+					const chunks: Uint8Array[] = [];
+					for await (const chunk of stream) chunks.push(chunk);
+					received = Buffer.concat(chunks);
+					cb(null);
+				},
+			});
+			const client = new SMTPClient();
+			await client.connect(port);
+			if (tls) {
+				client.send("STARTTLS");
+				expect(await client.readResponse()).toMatch(/^220/);
+				await client.upgradeTLS();
+			}
+			await startData(client);
+
+			const line = `${"abcdefghij".repeat(7)}\r\n`;
+			const body = Buffer.from(line.repeat(Math.ceil((5 * 1024 * 1024) / 72)));
+			await client.sendAll(Buffer.concat([body, Buffer.from(".\r\nNOOP\r\n")]));
+			expect(await client.readResponse()).toMatch(/^250/);
+			expect(await client.readResponse()).toMatch(/^250/);
+			expect(received).not.toBeNull();
+			expect((received as Buffer | null)?.equals(body)).toBe(true);
+
+			client.close();
+			await new Promise<void>((r) => server.close(r));
+		});
+	}
 });
