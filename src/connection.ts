@@ -26,6 +26,7 @@ import type {
 } from "./types.ts";
 
 const SOCKET_TIMEOUT = 60_000;
+const DATA_HIGH_WATER_MARK = 1024 * 1024;
 
 // Enhanced status codes (RFC 3463)
 const ENHANCED_STATUS_CODES: Record<number, string> = {
@@ -914,13 +915,25 @@ const HANDLERS: Record<string, Handler> = {
 
 		sendRaw(ctx, R_DATA_354);
 
-		// Create a ReadableStream backed by the dot-unstuffer
+		// Create a ReadableStream backed by the dot-unstuffer. The socket is paused
+		// while the consumer lags DATA_HIGH_WATER_MARK bytes behind.
 		let controller!: ReadableStreamDefaultController<Uint8Array>;
-		const stream = new ReadableStream<Uint8Array>({
-			start(c) {
-				controller = c;
+		let paused = false;
+		const resume = (): void => {
+			if (!paused) return;
+			paused = false;
+			ctx.socket.resume();
+			resetTimeout(ctx);
+		};
+		const stream = new ReadableStream<Uint8Array>(
+			{
+				start(c) {
+					controller = c;
+				},
+				pull: resume,
 			},
-		}) as DataStream;
+			new ByteLengthQueuingStrategy({ highWaterMark: DATA_HIGH_WATER_MARK }),
+		) as DataStream;
 
 		ctx.dataController = controller;
 		ctx.dataStream = stream;
@@ -939,11 +952,18 @@ const HANDLERS: Record<string, Handler> = {
 					return;
 				}
 				controller.enqueue(new Uint8Array(chunk));
+				if (!paused && (controller.desiredSize ?? 1) <= 0) {
+					paused = true;
+					ctx.socket.pause();
+				}
 			},
 			onDataEnd(byteLength, sizeExceeded) {
 				stream.byteLength = byteLength;
 				stream.sizeExceeded = sizeExceeded;
 				controller.close();
+				// pull() never fires on a closed stream; resume so pipelined
+				// commands after the terminator keep flowing.
+				resume();
 				ctx.dataController = null;
 				ctx.dataStream = null;
 			},

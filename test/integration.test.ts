@@ -118,6 +118,18 @@ class SMTPClient {
 		(this.socket as unknown as { write(data: string): void }).write(data);
 	}
 
+	/** Send a large payload, retrying partial writes (Bun sockets don't buffer). */
+	async sendAll(data: Buffer): Promise<void> {
+		const socket = this.socket as unknown as { write(data: Buffer): number };
+		let offset = 0;
+		while (offset < data.length) {
+			const n = socket.write(data.subarray(offset));
+			if (n < 0) throw new Error("socket closed");
+			offset += n;
+			if (offset < data.length) await Bun.sleep(1);
+		}
+	}
+
 	/**
 	 * Upgrade the existing plain TCP connection to TLS (STARTTLS client side).
 	 * Must be called after the server has responded with "220 Ready to start TLS".
@@ -1227,4 +1239,38 @@ describe("Hardening", () => {
 		client.close();
 		await new Promise<void>((r) => server.close(r));
 	});
+
+	for (const tls of [false, true]) {
+		test(`slow consumer receives a 5 MB body intact${tls ? " over STARTTLS" : ""}`, async () => {
+			let received: Buffer | null = null;
+			const { server, port } = makeServer({
+				async onData(stream, _session, cb) {
+					await Bun.sleep(200);
+					const chunks: Uint8Array[] = [];
+					for await (const chunk of stream) chunks.push(chunk);
+					received = Buffer.concat(chunks);
+					cb(null);
+				},
+			});
+			const client = new SMTPClient();
+			await client.connect(port);
+			if (tls) {
+				client.send("STARTTLS");
+				expect(await client.readResponse()).toMatch(/^220/);
+				await client.upgradeTLS();
+			}
+			await startData(client);
+
+			const line = `${"abcdefghij".repeat(7)}\r\n`;
+			const body = Buffer.from(line.repeat(Math.ceil((5 * 1024 * 1024) / 72)));
+			await client.sendAll(Buffer.concat([body, Buffer.from(".\r\nNOOP\r\n")]));
+			expect(await client.readResponse()).toMatch(/^250/);
+			expect(await client.readResponse()).toMatch(/^250/);
+			expect(received).not.toBeNull();
+			expect((received as Buffer | null)?.equals(body)).toBe(true);
+
+			client.close();
+			await new Promise<void>((r) => server.close(r));
+		});
+	}
 });
